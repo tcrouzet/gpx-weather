@@ -16,3 +16,7 @@ python app.py
 ```
 
 La carte est écrite dans `_output/index.html`.
+
+En dehors de GitHub Actions, `python app.py` déclenche ensuite automatiquement
+le workflow Pages. La nouvelle version publique apparaît généralement moins
+d'une minute plus tard sur <https://tcrouzet.github.io/gpx-weather/>.

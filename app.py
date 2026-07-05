@@ -8,6 +8,8 @@ carto.py pour produire la visualisation Leaflet interactive.
 
 import os
 import json
+import shutil
+import subprocess
 from datetime import datetime, timezone
 
 import config
@@ -38,6 +40,25 @@ def weather_cache_is_fresh(max_age_hours):
         return cache_is_fresh(config.csv_path, max_age_hours)
 
 
+def publish_pages():
+    """Declenche la regeneration distante, sauf depuis GitHub Actions.
+
+    Le workflow relit le depot et recupere lui-meme les donnees fraiches ;
+    aucun cache local ni secret n'est envoye vers GitHub.
+    """
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    gh = shutil.which("gh")
+    if not gh:
+        raise RuntimeError("GitHub CLI (gh) est requis pour publier la carte")
+    repository = getattr(config, "github_repository", "tcrouzet/gpx-weather")
+    subprocess.run(
+        [gh, "workflow", "run", "pages.yml", "--repo", repository],
+        check=True,
+    )
+    print(f"Publication GitHub Pages déclenchée : {config.github_pages_url}")
+
+
 def main():
 
     if not os.path.exists(config.towns_csv_path):
@@ -61,6 +82,7 @@ def main():
         )
 
     run_step("carto", "Étape 4 : carto Leaflet")
+    publish_pages()
     print("\nPipeline terminé.")
 
 

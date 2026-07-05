@@ -13,6 +13,10 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Publication GitHub Pages declenchee par app.py apres une generation locale.
+github_repository = "tcrouzet/gpx-weather"
+github_pages_url = "https://tcrouzet.github.io/gpx-weather/"
+
 # Nom
 project ="Tourmagne"
 
