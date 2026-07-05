@@ -1,0 +1,8 @@
+.DS_Store
+venv/
+__pycache__/
+*.pyc
+.cache_meteo*
+_output/*
+!_output/villes.csv
+*.tmp

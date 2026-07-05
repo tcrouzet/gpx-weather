@@ -1,0 +1,8 @@
+gpxpy
+openmeteo-requests
+requests-cache
+retry-requests
+pandas
+numpy
+shapely
+requests
