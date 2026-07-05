@@ -3,6 +3,5 @@ venv/
 __pycache__/
 *.pyc
 .cache_meteo*
-_output/*
-!_output/villes.csv
+_output/
 *.tmp

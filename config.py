@@ -73,7 +73,7 @@ outdir = os.path.join(BASE_DIR, "_output")
 csv_path = os.path.join(outdir, "previsions_brutes.csv")
 weather_cache_meta_path = os.path.join(outdir, "previsions_brutes.meta.json")
 html_path = os.path.join(outdir, "index.html")
-towns_csv_path = os.path.join(outdir, "villes.csv")
+towns_csv_path = os.path.join(BASE_DIR, "villes.csv")
 
 
 # Cache de TOUTES les communes trouvees le long de la trace (une seule

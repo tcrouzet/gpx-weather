@@ -16,6 +16,7 @@ python app.py
 ```
 
 La carte est écrite dans `_output/index.html`.
+Le répertoire `_output` est entièrement local et n'est jamais versionné.
 
 En dehors de GitHub Actions, `python app.py` déclenche ensuite automatiquement
 le workflow Pages. La nouvelle version publique apparaît généralement moins
