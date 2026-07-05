@@ -92,6 +92,15 @@ def build_html(payload):
     speed = max(100, int(getattr(config, "speed", .5) * 1000))
     return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
+<meta name="description" content="Prévisions météo interactives du parcours {title}">
+<meta property="og:type" content="website"><meta property="og:locale" content="fr_FR">
+<meta property="og:title" content="{title} — prévisions météo">
+<meta property="og:description" content="Carte météo interactive du parcours, actualisée automatiquement.">
+<meta property="og:url" content="https://tcrouzet.github.io/gpx-weather/">
+<meta property="og:image" content="https://tcrouzet.github.io/gpx-weather/preview.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Aperçu des prévisions météo du parcours {title}">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 *{{box-sizing:border-box}} html,body{{height:100%;margin:0;overflow:hidden;font-family:system-ui,sans-serif}}
