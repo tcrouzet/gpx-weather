@@ -165,28 +165,28 @@ font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
 .temperature{{color:#111;font-size:18px;font-weight:900;white-space:nowrap;
 text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 .weather{{transform:translate(-50%,-50%);font-size:42px;filter:drop-shadow(0 1px 2px white)}}
-.details{{flex:1;min-height:0;overflow:auto;background:#fff;color:#17234d;line-height:1.3}}
+.details{{flex:1;min-height:0;overflow:hidden;background:#fff;color:#17234d;line-height:1.2}}
 .details[hidden]{{display:none}} main.details-open #map,main.details-open .controls{{display:none}}
-.details-shell{{width:min(920px,100%);min-height:100%;margin:auto;padding:16px 18px 28px}}
-.sheet-head{{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;margin-bottom:10px}}
-.sheet-head h2{{font-size:22px;text-align:center;margin:0;color:#111}}
-.close-details{{border:1px solid #ddd;background:#f6f6f8;border-radius:20px;padding:8px 15px;font-size:14px;cursor:pointer}}
-.daily-strip{{display:flex;gap:6px;overflow-x:auto;padding:6px calc(50% - 37px);scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
-.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 74px;width:74px;border:0;background:transparent;border-radius:12px;padding:7px 4px;
-display:grid;grid-template-rows:32px auto auto;place-items:center;color:#70768c;scroll-snap-align:center;cursor:pointer}}
-.daily-choice .daily-icon{{font-size:27px}} .daily-choice .daily-weekday{{font-size:12px}} .daily-choice .daily-number{{font-size:18px;font-weight:800;color:#315bb5}}
+.details-shell{{width:min(920px,100%);height:100%;margin:auto;padding:8px 14px;display:flex;flex-direction:column;overflow:hidden}}
+.sheet-head{{flex:0 0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin-bottom:4px}}
+.sheet-head h2{{font-size:20px;text-align:center;margin:0;color:#111}}
+.close-details{{border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;cursor:pointer}}
+.daily-strip{{flex:0 0 52px;display:flex;gap:3px;overflow-x:auto;padding:2px 6px;scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
+.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 48px;width:48px;border:0;background:transparent;border-radius:8px;padding:2px;
+display:grid;grid-template-columns:22px 1fr;grid-template-rows:1fr 1fr;place-items:center;color:#70768c;scroll-snap-align:center;cursor:pointer}}
+.daily-choice .daily-icon{{grid-row:1/3;font-size:20px}} .daily-choice .daily-weekday{{font-size:9px}} .daily-choice .daily-number{{font-size:14px;font-weight:800;color:#315bb5}}
 .daily-choice.active{{background:#f6a800;color:#fff}} .daily-choice.active .daily-number{{color:#fff}}
-.day-summary{{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;padding:14px 0}}
-.day-summary>div:last-child{{text-align:right}} .summary-label{{display:block;font-size:13px;color:#73798d}} .summary-value{{display:block;font-size:23px;font-weight:850}}
-.summary-weather{{text-align:center}} .summary-weather span{{display:block;font-size:38px}} .summary-weather small{{color:#73798d}}
-.forecast-chart{{background:#fafafd;border-radius:14px;padding:8px;overflow:hidden}} .forecast-chart svg{{display:block;width:100%;height:auto}}
-.chart-key{{display:flex;justify-content:center;gap:16px;font-size:11px;margin:5px 0 10px;color:#666}}
-.chart-key i{{display:inline-block;width:14px;height:4px;margin-right:4px;vertical-align:middle}}
-.metric-grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-top:14px}}
-.metric{{min-height:72px;background:#ececf2;border-radius:12px;padding:10px}} .metric-label{{display:block;font-size:12px;color:#68708c;margin-bottom:5px}}
-.metric-value{{display:block;font-size:18px;font-weight:800;color:#17234d}} .detail-source{{margin:13px 2px 0;font-size:11px;color:#68708c}}
-.detail-source a{{color:#315bb5}} @media(max-width:600px){{.details-shell{{padding:12px 10px 22px}}.sheet-head h2{{font-size:19px}}
-.day-summary{{gap:6px}}.summary-value{{font-size:19px}}}}
+#details-content{{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}}
+.forecast-chart{{flex:1 1 auto;min-height:125px;background:#fafafd;border-radius:10px;padding:3px;overflow:hidden}} .forecast-chart svg{{display:block;width:100%;height:100%}}
+.metric-grid{{flex:0 0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}}
+.metric{{min-height:58px;background:#ececf2;border-radius:9px;padding:7px 9px}} .metric-label{{display:block;font-size:10px;color:#68708c;margin-bottom:3px}}
+.metric-value{{display:block;font-size:15px;font-weight:800;color:#17234d}} .metric.temperature-card{{background:#ff4b4f}} .metric.gust-card{{background:#55c94c}}
+.metric.temperature-card *,.metric.gust-card *{{color:#fff}} .metric.rain-card{{background:#e8edf8}} .metric.wind-card{{background:#e8edf8}}
+.detail-source{{flex:0 0 auto;margin:5px 2px 0;text-align:center;font-size:10px;color:#68708c}} .detail-source a{{color:#315bb5;font-weight:700}}
+@media(max-width:600px){{.details-shell{{padding:7px 7px}}.sheet-head h2{{font-size:18px}}.metric-grid{{grid-template-columns:repeat(2,1fr);gap:5px}}
+.metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}}}
+@media(max-height:680px){{.daily-strip{{flex-basis:46px}}.daily-choice{{grid-template-columns:20px 1fr}}.daily-choice .daily-icon{{font-size:18px}}
+.metric{{min-height:45px}}.detail-source{{margin-top:3px}}}}
 .controls{{height:112px;flex:0 0 112px;background:#18295c;color:#fff;padding:5px 0}}
 .timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:4px}}
 .strip-wrap{{position:relative;min-width:0;overflow:hidden}} .strip-wrap::after{{content:"";position:absolute;z-index:0;
@@ -272,13 +272,15 @@ function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById
     const center=dailyStrip.scrollLeft+dailyStrip.clientWidth/2,buttons=[...dailyStrip.querySelectorAll('button')],closest=buttons.reduce((best,button)=>Math.abs(button.offsetLeft+button.offsetWidth/2-center)<Math.abs(best.offsetLeft+best.offsetWidth/2-center)?button:best,buttons[0]);
     dailyUserScroll=false;if(closest&&!closest.classList.contains('active'))showDetails(id,closest.dataset.date);
   }},160)}};requestAnimationFrame(()=>{{const active=dailyStrip.querySelector('.active');if(active)dailyStrip.scrollTo({{left:active.offsetLeft-(dailyStrip.clientWidth-active.offsetWidth)/2,behavior:'smooth'}})}});
-  const rainCard=selected.rain_probability===null?'':`<div class="metric"><span class="metric-label">Risque de pluie</span><span class="metric-value">${{selected.rain_probability}} %</span></div>`;
-  document.querySelector('#details-content').innerHTML=`<div class="day-summary"><div><span class="summary-label">Températures</span><span class="summary-value">${{selected.temperature_min}}° / ${{selected.temperature_max}}°</span></div>
-  <div class="summary-weather"><span>${{icons[selected.weather]}}</span><small>${{weatherNames[selected.weather]}}</small></div><div><span class="summary-label">Rafales</span><span class="summary-value">${{selected.gusts}} km/h</span></div></div>
-  <div class="chart-key"><span><i style="background:#ef4444"></i>maximales</span><span><i style="background:#3182ce"></i>minimales</span><span><i style="background:#50c744"></i>vent</span></div>${{dailyChart(town,selectedIndex)}}
-  <div class="metric-grid">${{rainCard}}<div class="metric"><span class="metric-label">Précipitations</span><span class="metric-value">${{selected.precipitation}} mm</span></div>
-  <div class="metric"><span class="metric-label">Vent maximal</span><span class="metric-value">${{selected.wind}} km/h · ${{selected.wind_direction}}</span></div><div class="metric"><span class="metric-label">Rafales</span><span class="metric-value">${{selected.gusts}} km/h</span></div></div>
-  <p class="detail-source">${{source}}${{selected.ensemble?' — incertitude croissante avec l’échéance.':''}}<br><a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></p>`;
+  const rainValue=selected.rain_probability===null?'—':`${{selected.rain_probability}} %`;
+  document.querySelector('#details-content').innerHTML=`${{dailyChart(town,selectedIndex)}}
+  <div class="metric-grid"><div class="metric temperature-card"><span class="metric-label">Températures</span><span class="metric-value">${{selected.temperature_min}}° / ${{selected.temperature_max}}°</span></div>
+  <div class="metric rain-card"><span class="metric-label">Risque de pluie</span><span class="metric-value">${{rainValue}}</span></div>
+  <div class="metric rain-card"><span class="metric-label">Précipitations</span><span class="metric-value">${{selected.precipitation}} mm</span></div>
+  <div class="metric"><span class="metric-label">Conditions</span><span class="metric-value">${{icons[selected.weather]}} ${{weatherNames[selected.weather]}}</span></div>
+  <div class="metric wind-card"><span class="metric-label">Vent maximal</span><span class="metric-value">${{selected.wind}} km/h · ${{selected.wind_direction}}</span></div>
+  <div class="metric gust-card"><span class="metric-label">Rafales</span><span class="metric-value">${{selected.gusts}} km/h</span></div></div>
+  <p class="detail-source"><a href="${{sourceUrl}}" target="_blank" rel="noopener">${{source}}</a>${{selected.ensemble?' — incertitude croissante avec l’échéance.':''}}</p>`;
   details.hidden=false;document.querySelector('main').classList.add('details-open');
 }}
 function show(i,draggedStrip=null){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
