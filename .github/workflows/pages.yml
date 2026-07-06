@@ -27,7 +27,14 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-pages.txt
       - run: pip install -r requirements-pages.txt
-      - run: python app.py
+      - name: Générer les prévisions avec reprise réseau
+        run: |
+          for attempt in 1 2 3; do
+            python app.py && break
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            echo "Open-Meteo indisponible, nouvelle tentative dans 30 secondes..."
+            sleep 30
+          done
       - name: Préparer les pages des parcours
         run: |
           mkdir -p _site

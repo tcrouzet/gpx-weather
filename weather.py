@@ -76,14 +76,24 @@ def load_towns(towns_csv_path):
 def build_openmeteo_client():
     """Client Open-Meteo avec cache disque (1h) et retry automatique."""
     cache_session = requests_cache.CachedSession(".cache_meteo", expire_after=3600)
-    retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+    retry_session = retry(
+        cache_session,
+        retries=5,
+        backoff_factor=0.8,
+        status_to_retry=(429, 500, 502, 503, 504),
+    )
     return openmeteo_requests.Client(session=retry_session)
 
 
 def build_http_session():
     """Session JSON partageant le meme cache et la meme politique de retry."""
     cache_session = requests_cache.CachedSession(".cache_meteo", expire_after=3600)
-    return retry(cache_session, retries=5, backoff_factor=0.2)
+    return retry(
+        cache_session,
+        retries=5,
+        backoff_factor=0.8,
+        status_to_retry=(429, 500, 502, 503, 504),
+    )
 
 
 def get_forecast_for_point(client, lat, lon, forecast_days=16):
