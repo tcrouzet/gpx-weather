@@ -186,6 +186,8 @@ min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 
 .route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}
 .route-menu a:hover{{background:#edf1fa}}
 .leaflet-overlay-pane svg{{z-index:450}}
+.route-arrow{{background:transparent;border:0}} .route-arrow span{{position:relative;display:block;width:16px;height:16px;filter:drop-shadow(0 0 1px #fff)}}
+.route-arrow span::before{{content:"";position:absolute;left:3px;top:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:13px solid #d62728}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
 .temperature{{color:#111;font-size:18px;font-weight:900;white-space:nowrap;
@@ -248,6 +250,20 @@ const topo=L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png
   attribution:osmAttribution+' | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'}});
 L.control.layers({{'OSM classique':osm,'Carte claire':positron,'Voyager':voyager,'Topographique':topo}},null,{{collapsed:true}}).addTo(map);
 const route=L.polyline(data.route,{{color:'#d62728',weight:4,opacity:.9}}).addTo(map); map.fitBounds(route.getBounds(),{{padding:[35,35]}});
+function addRouteArrows(points){{
+  const distance=(a,b)=>{{const toRad=Math.PI/180,dLat=(b[0]-a[0])*toRad,dLon=(b[1]-a[1])*toRad,lat1=a[0]*toRad,lat2=b[0]*toRad;
+    const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h))}};
+  const bearing=(a,b)=>{{const toRad=Math.PI/180,dLon=(b[1]-a[1])*toRad,lat1=a[0]*toRad,lat2=b[0]*toRad;
+    return Math.atan2(Math.sin(dLon)*Math.cos(lat2),Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon))*180/Math.PI}};
+  const cumulative=[0];for(let i=1;i<points.length;i++)cumulative.push(cumulative[i-1]+distance(points[i-1],points[i]));
+  const total=cumulative.at(-1),count=11;for(let arrow=1;arrow<=count;arrow++){{const target=total*arrow/(count+1);
+    let i=1;while(i<cumulative.length&&cumulative[i]<target)i++;if(i>=points.length)break;
+    const segment=cumulative[i]-cumulative[i-1],ratio=segment?(target-cumulative[i-1])/segment:0,a=points[i-1],b=points[i];
+    const position=[a[0]+(b[0]-a[0])*ratio,a[1]+(b[1]-a[1])*ratio],angle=bearing(a,b);
+    L.marker(position,{{interactive:false,keyboard:false,icon:L.divIcon({{className:'route-arrow',iconSize:[16,16],iconAnchor:[8,8],html:`<span style="transform:rotate(${{angle}}deg)"></span>`}})}}).addTo(map);
+  }}
+}}
+addRouteArrows(data.route);
 const markers={{}}; for(const town of data.towns){{const marker=L.marker([town.lat,town.lon],{{icon:L.divIcon({{
 className:'meteo-marker',iconSize:[1,1],iconAnchor:[0,0],html:
 `<span class="temperature">–</span><span class="weather"></span>`}})}}).addTo(map);
