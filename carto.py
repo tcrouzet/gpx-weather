@@ -137,16 +137,18 @@ background:#fffffff2;color:#171717;border-radius:8px;padding:12px 14px;box-shado
 .details button{{position:absolute;right:6px;top:5px;border:0;background:none;font-size:20px;cursor:pointer}}
 .controls{{height:112px;flex:0 0 112px;background:#18295c;color:#fff;padding:5px 0}}
 .timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:4px}}
-.strip{{display:flex;align-items:stretch;gap:5px;overflow-x:auto;padding:2px max(12px,calc(50vw - 45px));
+.strip-wrap{{position:relative;min-width:0;overflow:hidden}} .strip-wrap::after{{content:"";position:absolute;z-index:0;
+left:50%;top:2px;bottom:2px;width:80px;transform:translateX(-50%);border-radius:8px;background:#f6a800;pointer-events:none}}
+.strip{{position:relative;z-index:1;height:100%;display:flex;align-items:stretch;gap:5px;overflow-x:auto;padding:2px calc(50% - 40px);
 scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}}
-.strip::-webkit-scrollbar{{display:none}} .strip button{{flex:0 0 auto;min-width:74px;border:0;border-radius:8px;
+.strip::-webkit-scrollbar{{display:none}} .strip button{{flex:0 0 80px;width:80px;border:0;border-radius:8px;
 background:transparent;color:#fff;font-size:15px;font-weight:650;scroll-snap-align:center;cursor:pointer;padding:7px 12px}}
-.hours button{{min-width:64px}} .strip button.active{{background:#f6a800;color:#fff;font-weight:850}}
+.strip button.active{{color:#fff;font-weight:850}}
 .map-play{{width:56px;height:56px;border:0;border-radius:50%;background:#352d32e8;color:#fff;font-size:27px;
 display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
 </style></head><body><main><div class="title">{title}</div><div id="map">
 <aside id="details" class="details" hidden><button id="close-details" aria-label="Fermer">×</button><div id="details-content"></div></aside></div>
-<div class="controls"><div class="timeline"><div id="days" class="strip days"></div><div id="hours" class="strip hours"></div></div></div>
+<div class="controls"><div class="timeline"><div class="strip-wrap"><div id="days" class="strip days"></div></div><div class="strip-wrap"><div id="hours" class="strip hours"></div></div></div></div>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}};
 const map=L.map('map',{{zoomControl:true}});
@@ -202,7 +204,7 @@ function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.f
   <a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></small></p>`;
   details.hidden=false;
 }}
-function show(i){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
+function show(i,draggedStrip=null){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
   for(const [id,m] of Object.entries(markers)){{const v=f.values[id],e=m.getElement();if(!e||!v)continue;const temp=e.querySelector('.temperature');
     temp.textContent=v.temperature+'°';e.querySelector('.weather').textContent=icons[v.weather];
     e.title=v.ensemble?`${{v.low}} à ${{v.high}}°C (80 % des scénarios)`:'';
@@ -210,7 +212,7 @@ function show(i){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));cons
   const activeDay=days.querySelector(`[data-day="${{f.day}}"]`),activeHour=hours.querySelector(`[data-hour="${{f.hour}}"]`);
   days.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeDay));
   hours.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeHour));
-  centerChoice(days,activeDay);centerChoice(hours,activeHour);
+  if(draggedStrip!==days)centerChoice(days,activeDay);if(draggedStrip!==hours)centerChoice(hours,activeHour);
   if(selectedTownId)showDetails(selectedTownId);requestAnimationFrame(layoutLabels);
 }}
 function centerChoice(strip,button){{if(button)strip.scrollTo({{left:button.offsetLeft-(strip.clientWidth-button.offsetWidth)/2,behavior:'smooth'}})}}
@@ -224,13 +226,16 @@ const seenDays=new Set();data.frames.forEach(frame=>{{if(seenDays.has(frame.day)
 const uniqueHours=[...new Set(data.frames.map(frame=>frame.hour))].sort((a,b)=>a-b);uniqueHours.forEach(hour=>{{const button=document.createElement('button');
   button.dataset.hour=hour;button.textContent=`${{String(hour).padStart(2,'0')}}:00`;button.onclick=()=>{{stop();show(indexFor(data.frames[currentIndex].day,hour))}};hours.append(button);
 }});
-function enableSlideSelection(strip){{let pending,userScrolling=false;const arm=()=>{{userScrolling=true}};strip.addEventListener('pointerdown',arm);
+function selectCentered(strip,button){{if(!button)return;stop();if(strip===days)show(indexFor(button.dataset.day,data.frames[currentIndex].hour),strip);
+  else show(indexFor(data.frames[currentIndex].day,Number(button.dataset.hour)),strip);
+}}
+function enableSlideSelection(strip){{let pending,animationFrame,userScrolling=false;const arm=()=>{{userScrolling=true}};strip.addEventListener('pointerdown',arm);
   strip.addEventListener('touchstart',arm,{{passive:true}});strip.addEventListener('wheel',arm,{{passive:true}});
-  strip.addEventListener('scroll',()=>{{if(!userScrolling)return;clearTimeout(pending);pending=setTimeout(()=>{{
+  strip.addEventListener('scroll',()=>{{if(!userScrolling)return;cancelAnimationFrame(animationFrame);animationFrame=requestAnimationFrame(()=>{{
     const center=strip.scrollLeft+strip.clientWidth/2,buttons=[...strip.querySelectorAll('button')];
     const closest=buttons.reduce((best,button)=>Math.abs(button.offsetLeft+button.offsetWidth/2-center)<Math.abs(best.offsetLeft+best.offsetWidth/2-center)?button:best,buttons[0]);
-    userScrolling=false;if(closest&&!closest.classList.contains('active'))closest.click();
-  }},180)}});
+    if(closest&&!closest.classList.contains('active'))selectCentered(strip,closest);
+  }});clearTimeout(pending);pending=setTimeout(()=>{{userScrolling=false;const active=strip.querySelector('button.active');centerChoice(strip,active)}},160)}});
 }}
 enableSlideSelection(days);enableSlideSelection(hours);
 let timer=null;function stop(){{clearInterval(timer);timer=null;if(mapPlay)mapPlay.textContent='▶'}}function toggle(){{if(timer)return stop();if(currentIndex===data.frames.length-1)show(0);mapPlay.textContent='⏸';
