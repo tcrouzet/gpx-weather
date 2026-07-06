@@ -179,7 +179,7 @@ def build_html(payload):
 main{{position:relative;height:100dvh;display:flex;flex-direction:column;background:#171717}} #map{{min-height:0;flex:1}}
 .title{{position:relative;flex:0 0 auto;background:#18295c;color:white;padding:6px 48px;text-align:center;
 font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
-.menu-button{{position:absolute;left:4px;top:0;width:42px;height:100%;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;display:grid;place-items:center}}
+.menu-button{{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:42px;height:32px;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;display:grid;place-items:center}}
 .menu-button::before{{content:"";width:25px;height:3px;border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
 .route-menu{{position:absolute;z-index:2000;left:8px;top:38px;
 min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005;text-align:left}}

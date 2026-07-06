@@ -6,7 +6,7 @@
   "start_url": "/gpx-weather/",
   "scope": "/gpx-weather/",
   "display": "standalone",
-  "orientation": "any",
+  "orientation": "portrait-primary",
   "background_color": "#18295c",
   "theme_color": "#18295c",
   "icons": [

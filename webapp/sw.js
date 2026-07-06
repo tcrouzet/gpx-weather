@@ -1,4 +1,4 @@
-const CACHE = 'gpx-weather-v2';
+const CACHE = 'gpx-weather-v3';
 const ROOT = '/gpx-weather/';
 const SHELL = [ROOT, `${ROOT}manifest.webmanifest`, `${ROOT}icon-192.png`, `${ROOT}icon-512.png`];
 
