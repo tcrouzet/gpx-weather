@@ -11,6 +11,7 @@ import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
+from html import escape
 
 import config
 
@@ -56,10 +57,31 @@ def publish_pages():
         [gh, "workflow", "run", "pages.yml", "--repo", repository],
         check=True,
     )
-    print(f"Publication GitHub Pages déclenchée : {config.github_pages_url}")
+    print(f"Publication GitHub Pages déclenchée : {config.github_pages_base_url}/")
 
 
-def main():
+def write_routes_index(routes):
+    """Crée l'accueil Pages listant tous les parcours disponibles."""
+    os.makedirs(config.output_root, exist_ok=True)
+    links = "".join(
+        f'<li><a href="{escape(slug)}/">{escape(title)}</a></li>'
+        for slug, title in routes
+    )
+    html = (
+        '<!doctype html><html lang="fr"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Prévisions météo des parcours</title>'
+        '<style>body{font:18px system-ui;max-width:700px;margin:3rem auto;padding:1rem}'
+        'li{margin:.8rem 0}a{color:#1677d2}</style>'
+        f'<h1>Prévisions météo des parcours</h1><ul>{links}</ul></html>'
+    )
+    with open(os.path.join(config.output_root, "index.html"), "w", encoding="utf-8") as handle:
+        handle.write(html)
+
+
+def process_route(gpx_path):
+    config.configure_route(gpx_path)
+    print(f"\n##### Parcours : {config.project} ({config.route_slug}) #####")
 
     if not os.path.exists(config.towns_csv_path):
         run_step("town", "Étape 1 : town")
@@ -82,6 +104,17 @@ def main():
         )
 
     run_step("carto", "Étape 4 : carto Leaflet")
+
+
+def main():
+    gpx_files = config.list_gpx_files()
+    if not gpx_files:
+        raise FileNotFoundError(f"Aucun fichier .gpx dans {config.gpx_dir}")
+    routes = []
+    for gpx_path in gpx_files:
+        process_route(gpx_path)
+        routes.append((config.route_slug, config.project))
+    write_routes_index(routes)
     publish_pages()
     print("\nPipeline terminé.")
 

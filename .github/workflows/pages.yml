@@ -28,20 +28,31 @@ jobs:
           cache-dependency-path: requirements-pages.txt
       - run: pip install -r requirements-pages.txt
       - run: python app.py
-      - run: mkdir -p _site && cp _output/index.html _site/index.html
+      - name: Préparer les pages des parcours
+        run: |
+          mkdir -p _site
+          cp _output/index.html _site/index.html
+          for page in _output/*/index.html; do
+            slug="$(basename "$(dirname "$page")")"
+            mkdir -p "_site/$slug"
+            cp "$page" "_site/$slug/index.html"
+          done
       - name: Installer Chrome pour la vignette
         id: chrome
         uses: browser-actions/setup-chrome@v2
       - name: Capturer la vignette de partage
         run: |
           python -m http.server 8000 --directory _site >/tmp/gpx-weather-http.log 2>&1 &
-          "${{ steps.chrome.outputs.chrome-path }}" \
-            --headless --disable-gpu --no-sandbox \
-            --hide-scrollbars --window-size=1200,630 \
-            --virtual-time-budget=8000 \
-            --screenshot="$GITHUB_WORKSPACE/_site/preview.png" \
-            http://127.0.0.1:8000/
-          test -s _site/preview.png
+          for page in _site/*/index.html; do
+            slug="$(basename "$(dirname "$page")")"
+            "${{ steps.chrome.outputs.chrome-path }}" \
+              --headless --disable-gpu --no-sandbox \
+              --hide-scrollbars --window-size=1200,630 \
+              --virtual-time-budget=8000 \
+              --screenshot="$GITHUB_WORKSPACE/_site/$slug/preview.png" \
+              "http://127.0.0.1:8000/$slug/"
+            test -s "_site/$slug/preview.png"
+          done
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

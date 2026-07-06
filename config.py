@@ -10,20 +10,15 @@ utilisent directement, plus besoin d'arguments en ligne de commande.
 """
 
 import os
+from pathlib import Path
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Publication GitHub Pages declenchee par app.py apres une generation locale.
 github_repository = "tcrouzet/gpx-weather"
-github_pages_url = "https://tcrouzet.github.io/gpx-weather/"
+github_pages_base_url = "https://tcrouzet.github.io/gpx-weather"
+gpx_dir = os.path.join(BASE_DIR, "gpx")
 
-# Nom
-project ="Tourmagne"
-
-# Fichier GPX source
-gpx_file = "source.gpx"
-
-town_search_buffer_km = 15
 endpoint_search_radius_km = 15
 
 # Nombre de jours de prevision a recuperer (max ~16 chez Open-Meteo)
@@ -44,19 +39,7 @@ gpx_simplify_degrees = 0.0005
 # Heures de prévision
 sample_hours = [0, 6, 12, 18]
 
-# Style du fond de carte pour meteo_carto.py
-# Choix possibles : "osm", "positron", "voyager", "terrain"
-basemap = "voyager"
-
-# Multiplicateur global de la taille des polices (titre du fond de carte,
-# date/heure et temperatures dans carto.py). 1.0 = taille par defaut,
-# 1.5 = 50% plus gros, etc.
-typo_size = 3
-background_color = "black"
-title_color = "white"
-
-# Qualite du fond WebP (0-100) et cadence de lecture du slider HTML.
-webp_quality = 86
+# Cadence de lecture du slider HTML.
 speed = 0.5
 
 
@@ -68,16 +51,32 @@ trip_days = 8
 # perpendiculaire de la trace GPX
 town_search_buffer_km = 15
 
-# --- Chemins derives, ne pas modifier ---
-outdir = os.path.join(BASE_DIR, "_output")
-csv_path = os.path.join(outdir, "previsions_brutes.csv")
-weather_cache_meta_path = os.path.join(outdir, "previsions_brutes.meta.json")
-html_path = os.path.join(outdir, "index.html")
-towns_csv_path = os.path.join(BASE_DIR, "villes.csv")
+output_root = os.path.join(BASE_DIR, "_output")
 
 
-# Cache de TOUTES les communes trouvees le long de la trace (une seule
-# requete Overpass). Si ce fichier existe deja, town.py ne refait pas
-# la requete Overpass et le relit directement : supprime-le si tu changes
-# de GPX ou si tu veux forcer une nouvelle requete.
-all_towns_csv_path = os.path.join(outdir, "all_towns.csv")
+def list_gpx_files():
+    """Retourne tous les parcours GPX, dans un ordre stable."""
+    return sorted(str(path) for path in Path(gpx_dir).glob("*.gpx"))
+
+
+def configure_route(path):
+    """Configure les chemins derives pour un parcours donne."""
+    global project, route_slug, gpx_file, outdir, csv_path
+    global weather_cache_meta_path, html_path, towns_csv_path
+    global all_towns_csv_path, github_pages_url
+
+    gpx_file = os.path.abspath(path)
+    route_slug = Path(path).stem.lower()
+    project = Path(path).stem.replace("-", " ").replace("_", " ").title()
+    outdir = os.path.join(output_root, route_slug)
+    csv_path = os.path.join(outdir, "previsions_brutes.csv")
+    weather_cache_meta_path = os.path.join(outdir, "previsions_brutes.meta.json")
+    html_path = os.path.join(outdir, "index.html")
+    towns_csv_path = os.path.join(gpx_dir, f"{route_slug}.villes.csv")
+    all_towns_csv_path = os.path.join(outdir, "all_towns.csv")
+    github_pages_url = f"{github_pages_base_url}/{route_slug}/"
+
+
+_routes = list_gpx_files()
+if _routes:
+    configure_route(_routes[0])

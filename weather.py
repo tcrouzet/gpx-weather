@@ -104,6 +104,7 @@ def get_forecast_for_point(client, lat, lon, forecast_days=16):
             "wind_speed_10m",
             "wind_gusts_10m",
             "weather_code",
+            "wind_direction_10m",
         ],
         "forecast_days": forecast_days,
         "models": "best_match",
@@ -129,6 +130,7 @@ def get_forecast_for_point(client, lat, lon, forecast_days=16):
             "wind_speed": hourly.Variables(2).ValuesAsNumpy(),
             "wind_gusts": hourly.Variables(3).ValuesAsNumpy(),
             "weather_code": hourly.Variables(4).ValuesAsNumpy(),
+            "wind_direction": hourly.Variables(5).ValuesAsNumpy(),
         }
     )
     df["lat"] = lat
@@ -152,7 +154,7 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     url = "https://ensemble-api.open-meteo.com/v1/ensemble"
     variables = [
         "temperature_2m", "precipitation", "weather_code",
-        "wind_speed_10m", "wind_gusts_10m",
+        "wind_speed_10m", "wind_gusts_10m", "wind_direction_10m",
     ]
     response = session.get(
         url,
@@ -181,6 +183,7 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     weather_codes = member_matrix("weather_code")
     wind = member_matrix("wind_speed_10m")
     gusts = member_matrix("wind_gusts_10m")
+    wind_direction = member_matrix("wind_direction_10m")
 
     # L'API peut completer la fin de la plage demandee avec des lignes dont
     # tous les membres sont absents. Elles ne constituent pas une prevision
@@ -192,6 +195,7 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     weather_codes = weather_codes[valid]
     wind = wind[valid]
     gusts = gusts[valid]
+    wind_direction = wind_direction[valid]
 
     result["temperature"] = np.nanmedian(temperature, axis=1)
     result["temperature_low"] = np.nanquantile(temperature, .10, axis=1)
@@ -217,6 +221,20 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
 
     result["wind_speed"] = median_or_zero(wind)
     result["wind_gusts"] = median_or_zero(gusts)
+
+    def circular_mean_degrees(matrix):
+        values = []
+        for row in matrix:
+            row = row[np.isfinite(row)]
+            if not len(row):
+                values.append(np.nan)
+                continue
+            radians = np.radians(row)
+            angle = np.degrees(np.arctan2(np.mean(np.sin(radians)), np.mean(np.cos(radians))))
+            values.append(angle % 360)
+        return np.array(values)
+
+    result["wind_direction"] = circular_mean_degrees(wind_direction)
     # Code majoritaire parmi les 51 scénarios, uniquement pour le pictogramme.
     def modal_weather_code(row):
         modes = pd.Series(row).dropna().astype(int).mode()

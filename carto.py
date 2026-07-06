@@ -34,6 +34,13 @@ def format_date_fr(ts):
     return f"{FR_JOURS[ts.weekday()]} {ts.day} {ts.hour}h"
 
 
+def wind_direction_label(value):
+    if value is None or pd.isna(value):
+        return "indéterminée"
+    labels = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
+    return labels[int((float(value) + 22.5) // 45) % 8]
+
+
 def load_track(path):
     with open(path, "r", encoding="utf-8") as handle:
         gpx = gpxpy.parse(handle)
@@ -79,6 +86,7 @@ def make_payload(forecasts, route):
                 "precipitation": round(float(row.get("precipitation", 0)), 1),
                 "wind": round(float(row.get("wind_speed", 0))),
                 "gusts": round(float(row.get("wind_gusts", 0))),
+                "wind_direction": wind_direction_label(row.get("wind_direction")),
                 "weather": weather_category(row.get("weather_code")),
                 "ensemble": row.get("data_source", "best_match") == "ecmwf_ifs_ensemble",
             }
@@ -96,6 +104,8 @@ def make_payload(forecasts, route):
 def build_html(payload):
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     title = escape(getattr(config, "project", "Prévisions météo"))
+    page_url = escape(config.github_pages_url, quote=True)
+    preview_url = escape(f"{config.github_pages_url}preview.png", quote=True)
     speed = max(100, int(getattr(config, "speed", .5) * 1000))
     return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
@@ -103,8 +113,8 @@ def build_html(payload):
 <meta property="og:type" content="website"><meta property="og:locale" content="fr_FR">
 <meta property="og:title" content="{title} — prévisions météo">
 <meta property="og:description" content="Carte météo interactive du parcours, actualisée automatiquement.">
-<meta property="og:url" content="https://tcrouzet.github.io/gpx-weather/">
-<meta property="og:image" content="https://tcrouzet.github.io/gpx-weather/preview.png">
+<meta property="og:url" content="{page_url}">
+<meta property="og:image" content="{preview_url}">
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Aperçu des prévisions météo du parcours {title}">
 <meta name="twitter:card" content="summary_large_image">
@@ -188,7 +198,7 @@ function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.f
   const precipitation=v.precipitation>0?`<p><b>Quantité de pluie :</b> ${{v.precipitation}} mm${{v.ensemble?' en moyenne':''}}</p>`:'';
   document.querySelector('#details-content').innerHTML=`<h2>${{escapeHtml(town.name)}} — ${{frame.label}}</h2>
   <p><b>Température :</b> ${{v.temperature}}°C</p>${{uncertainty}}${{rainProbability}}${{precipitation}}
-  <p><b>Vent :</b> ${{v.wind}} km/h, rafales ${{v.gusts}} km/h</p><p><small>${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}<br>
+  <p><b>Vent :</b> ${{v.wind}} km/h, direction ${{v.wind_direction}}, rafales ${{v.gusts}} km/h</p><p><small>${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}<br>
   <a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></small></p>`;
   details.hidden=false;
 }}
