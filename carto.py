@@ -180,7 +180,7 @@ main{{position:relative;height:100dvh;display:flex;flex-direction:column;backgro
 .title{{position:relative;flex:0 0 auto;background:#18295c;color:white;padding:6px 48px;text-align:center;
 font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
 .menu-button{{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:32px;height:28px;border:0;border-radius:6px;
-background:#ffffff20;color:#fff;font-size:20px;line-height:1;cursor:pointer}} .route-menu{{position:absolute;z-index:2000;left:8px;top:38px;
+background:transparent;color:#fff;font-size:20px;line-height:1;cursor:pointer}} .route-menu{{position:absolute;z-index:2000;left:8px;top:38px;
 min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005;text-align:left}}
 .route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}
 .route-menu a:hover{{background:#edf1fa}}
@@ -193,16 +193,16 @@ text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 .details{{flex:1;min-height:0;overflow:hidden;background:#fff;color:#17234d;line-height:1.2}}
 .details[hidden]{{display:none}} main.details-open #map,main.details-open .controls{{display:none}}
 .details-shell{{width:min(920px,100%);height:100%;margin:auto;padding:8px 14px;display:flex;flex-direction:column;overflow:hidden}}
-.sheet-head{{flex:0 0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin-bottom:4px}}
-.sheet-head h2{{font-size:20px;text-align:center;margin:0;color:#111}}
-.close-details{{border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;cursor:pointer}}
-.daily-strip{{flex:0 0 70px;display:flex;gap:3px;overflow-x:auto;padding:3px 6px;scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
-.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 56px;width:56px;border:0;background:transparent;border-radius:8px;padding:2px;
+.sheet-head{{position:relative;flex:0 0 32px;display:flex;align-items:center;margin-bottom:4px}}
+.sheet-head h2{{position:absolute;left:50%;width:70%;transform:translateX(-50%);font-size:20px;text-align:center;margin:0;color:#111}}
+.close-details{{position:absolute;z-index:1;left:0;top:50%;transform:translateY(-50%);border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;cursor:pointer}}
+.daily-strip{{flex:0 0 70px;display:flex;gap:0;overflow-x:auto;padding:3px 0;scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
+.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 48px;width:48px;border:0;background:transparent;border-radius:8px;padding:2px 0;
 display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-items:center;color:#70768c;scroll-snap-align:center;cursor:pointer}}
 .daily-choice .daily-icon{{font-size:21px;line-height:1}} .daily-choice .daily-weekday{{font-size:9px;line-height:1}} .daily-choice .daily-number{{font-size:14px;line-height:1;font-weight:800;color:#315bb5}}
 .daily-choice.active{{background:#f6a800;color:#fff}} .daily-choice.active .daily-number{{color:#fff}}
 #details-content{{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}}
-.forecast-chart{{flex:1 1 auto;min-height:125px;background:#fafafd;border-radius:10px;padding:3px;overflow:hidden}} .forecast-chart svg{{display:block;width:100%;height:100%}}
+.forecast-chart{{flex:1 1 0;min-height:0;background:#fafafd;border-radius:10px;overflow:hidden}} .forecast-chart svg{{display:block;width:100%;height:100%}}
 .metric-grid{{flex:0 0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}}
 .metric{{min-height:58px;background:#ececf2;border-radius:9px;padding:7px 9px}} .metric-label{{display:block;font-size:10px;color:#68708c;margin-bottom:3px}}
 .metric-value{{display:block;font-size:15px;font-weight:800;color:#17234d}} .metric.temperature-card{{background:#ff4b4f}} .metric.gust-card{{background:#55c94c}}
@@ -276,20 +276,20 @@ function layoutLabels(){{
   }}
 }}
 function escapeHtml(text){{const node=document.createElement('div');node.textContent=String(text);return node.innerHTML}}
-function dailyChart(town,selectedIndex){{const rows=town.daily,width=820,height=350,pad=34,tempTop=24,tempBottom=190,windBase=300;
+function dailyChart(town,selectedIndex){{const rows=town.daily,width=820,height=350,pad=16,tempTop=24,tempBottom=190,windBase=300;
   const temperatures=rows.flatMap(row=>[row.temperature_min,row.temperature_max]),tempMin=Math.floor(Math.min(...temperatures)-1),tempMax=Math.ceil(Math.max(...temperatures)+1);
   const maxWind=Math.max(1,...rows.map(row=>row.wind)),x=index=>pad+index/Math.max(1,rows.length-1)*(width-pad*2);
   const yTemp=value=>tempTop+(tempMax-value)/(tempMax-tempMin)*(tempBottom-tempTop),barWidth=Math.min(28,(width-pad*2)/rows.length*.55);
   const maxPoints=rows.map((row,index)=>`${{x(index)}},${{yTemp(row.temperature_max)}}`).join(' '),minPoints=rows.map((row,index)=>`${{x(index)}},${{yTemp(row.temperature_min)}}`).join(' ');
   const columns=rows.map((row,index)=>{{const px=x(index),barHeight=row.wind/maxWind*78,selected=index===selectedIndex;
-    return `<line x1="${{px}}" y1="18" x2="${{px}}" y2="${{windBase+24}}" stroke="${{selected?'#f6a800':'#e1e3e9'}}" stroke-width="${{selected?4:1}}" opacity="${{selected ? .65 : 1}}"/>
+    return `<rect x="${{px-barWidth/2}}" y="18" width="${{barWidth}}" height="${{windBase+6}}" rx="3" fill="${{selected?'#c9cdd6':'#eef0f4'}}" opacity="${{selected?.75:.7}}"/>
     <rect x="${{px-barWidth/2}}" y="${{windBase-barHeight}}" width="${{barWidth}}" height="${{barHeight}}" rx="3" fill="#50c744"/>
     <text x="${{px}}" y="${{windBase-barHeight-5}}" text-anchor="middle" font-size="10" fill="#389b31">${{row.wind}}</text>
     <text x="${{px}}" y="${{windBase+16}}" text-anchor="middle" font-size="17" fill="#17234d" transform="rotate(${{row.wind_degrees}} ${{px}} ${{windBase+11}})">↑</text>
     <text x="${{px}}" y="${{height-7}}" text-anchor="middle" font-size="10" fill="#70768c">${{row.weekday}} ${{row.day}}</text>`}}).join('');
   const labels=rows.map((row,index)=>`<text x="${{x(index)}}" y="${{yTemp(row.temperature_max)-7}}" text-anchor="middle" font-size="10" fill="#ef4444">${{row.temperature_max}}</text>
   <text x="${{x(index)}}" y="${{yTemp(row.temperature_min)+14}}" text-anchor="middle" font-size="10" fill="#3182ce">${{row.temperature_min}}</text>`).join('');
-  return `<div class="forecast-chart"><svg viewBox="0 0 ${{width}} ${{height}}" role="img">${{columns}}
+  return `<div class="forecast-chart"><svg viewBox="0 0 ${{width}} ${{height}}" preserveAspectRatio="none" role="img">${{columns}}
   <polyline points="${{maxPoints}}" fill="none" stroke="#ef4444" stroke-width="4" stroke-linejoin="round"/> <polyline points="${{minPoints}}" fill="none" stroke="#3182ce" stroke-width="4" stroke-linejoin="round"/>
   ${{labels}}</svg></div>`}}
 function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById[id];if(!town?.daily.length)return;
