@@ -186,7 +186,6 @@ min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 
 .route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}
 .route-menu a:hover{{background:#edf1fa}}
 .leaflet-overlay-pane svg{{z-index:450}}
-.route-arrow{{background:transparent;border:0}} .route-arrow svg{{display:block;overflow:visible}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
 .temperature{{color:#111;font-size:18px;font-weight:900;white-space:nowrap;
@@ -249,22 +248,18 @@ const topo=L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png
   attribution:osmAttribution+' | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'}});
 L.control.layers({{'OSM classique':osm,'Carte claire':positron,'Voyager':voyager,'Topographique':topo}},null,{{collapsed:true}}).addTo(map);
 const route=L.polyline(data.route,{{color:'#d62728',weight:4,opacity:.9}}).addTo(map); map.fitBounds(route.getBounds(),{{padding:[35,35]}});
-function addRouteArrows(points){{
-  const distance=(a,b)=>{{const toRad=Math.PI/180,dLat=(b[0]-a[0])*toRad,dLon=(b[1]-a[1])*toRad,lat1=a[0]*toRad,lat2=b[0]*toRad;
-    const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h))}};
-  const bearing=(a,b)=>{{const toRad=Math.PI/180,dLon=(b[1]-a[1])*toRad,lat1=a[0]*toRad,lat2=b[0]*toRad;
-    return Math.atan2(Math.sin(dLon)*Math.cos(lat2),Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon))*180/Math.PI}};
-  const cumulative=[0];for(let i=1;i<points.length;i++)cumulative.push(cumulative[i-1]+distance(points[i-1],points[i]));
-  const total=cumulative.at(-1),count=11;for(let arrow=1;arrow<=count;arrow++){{const target=total*arrow/(count+1);
-    let i=1;while(i<cumulative.length&&cumulative[i]<target)i++;if(i>=points.length)break;
-    const segment=cumulative[i]-cumulative[i-1],ratio=segment?(target-cumulative[i-1])/segment:0,a=points[i-1],b=points[i];
-    const position=[a[0]+(b[0]-a[0])*ratio,a[1]+(b[1]-a[1])*ratio],angle=bearing(a,b);
-    const arrowPath='<path d="M14 24V5M5 13l9-9 9 9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
-    const arrowSvg=`<svg width="28" height="28" viewBox="0 0 28 28" style="transform:rotate(${{angle}}deg)"><g stroke="#fff" stroke-width="8">${{arrowPath}}</g><g stroke="#d62728" stroke-width="4">${{arrowPath}}</g></svg>`;
-    L.marker(position,{{interactive:false,keyboard:false,icon:L.divIcon({{className:'route-arrow',iconSize:[28,28],iconAnchor:[14,14],html:arrowSvg}})}}).addTo(map);
+const routeArrows=L.layerGroup().addTo(map);
+function drawRouteArrows(){{routeArrows.clearLayers();const points=data.route.map(point=>map.latLngToLayerPoint(point)),spacing=55,size=5;let next=spacing/2;
+  for(let i=1;i<points.length;i++){{const a=points[i-1],b=points[i],dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);if(!length)continue;
+    const ux=dx/length,uy=dy/length,px=-uy,py=ux;while(next<=length){{const cx=a.x+ux*next,cy=a.y+uy*next;
+      const tip=L.point(cx+ux*size,cy+uy*size),back=L.point(cx-ux*size*.65,cy-uy*size*.65);
+      const left=L.point(back.x+px*size*.7,back.y+py*size*.7),right=L.point(back.x-px*size*.7,back.y-py*size*.7);
+      L.polyline([map.layerPointToLatLng(left),map.layerPointToLatLng(tip),map.layerPointToLatLng(right)],{{pane:'overlayPane',color:'#d62728',weight:2,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round'}}).addTo(routeArrows);
+      next+=spacing;
+    }}next-=length;
   }}
 }}
-addRouteArrows(data.route);
+drawRouteArrows();
 const markers={{}}; for(const town of data.towns){{const marker=L.marker([town.lat,town.lon],{{icon:L.divIcon({{
 className:'meteo-marker',iconSize:[1,1],iconAnchor:[0,0],html:
 `<span class="temperature">–</span><span class="weather"></span>`}})}}).addTo(map);
@@ -370,7 +365,7 @@ let timer=null;function stop(){{clearInterval(timer);timer=null;if(mapPlay)mapPl
 }}
 document.querySelector('#close-details').onclick=()=>{{details.hidden=true;selectedTownId=null;selectedDetailDate=null;document.querySelector('main').classList.remove('details-open');setTimeout(()=>map.invalidateSize(),0)}};
 document.addEventListener('keydown',event=>{{if(event.key==='ArrowLeft'){{stop();show(currentIndex-1)}}if(event.key==='ArrowRight'){{stop();show(currentIndex+1)}}if(event.key===' '){{event.preventDefault();toggle()}}}});
-map.on('zoomend moveend resize',layoutLabels);map.whenReady(()=>show(0));
+map.on('zoomend resize',drawRouteArrows);map.on('zoomend moveend resize',layoutLabels);map.whenReady(()=>show(0));
 if('serviceWorker' in navigator)navigator.serviceWorker.register('{escape(config.github_pages_base_url)}/sw.js');
 </script></body></html>"""
 
