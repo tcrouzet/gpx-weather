@@ -10,6 +10,8 @@ utilisent directement, plus besoin d'arguments en ligne de commande.
 """
 
 import os
+import re
+import unicodedata
 from pathlib import Path
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +61,15 @@ def list_gpx_files():
     return sorted(str(path) for path in Path(gpx_dir).glob("*.gpx"))
 
 
+def route_slug_for(path):
+    text = unicodedata.normalize("NFKD", Path(path).stem).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def route_title_for(path):
+    return Path(path).stem.replace("-", " ").replace("_", " ").title()
+
+
 def configure_route(path):
     """Configure les chemins derives pour un parcours donne."""
     global project, route_slug, gpx_file, outdir, csv_path
@@ -66,8 +77,8 @@ def configure_route(path):
     global all_towns_csv_path, github_pages_url
 
     gpx_file = os.path.abspath(path)
-    route_slug = Path(path).stem.lower()
-    project = Path(path).stem.replace("-", " ").replace("_", " ").title()
+    route_slug = route_slug_for(path)
+    project = route_title_for(path)
     outdir = os.path.join(output_root, route_slug)
     csv_path = os.path.join(outdir, "previsions_brutes.csv")
     weather_cache_meta_path = os.path.join(outdir, "previsions_brutes.meta.json")

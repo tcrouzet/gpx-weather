@@ -141,6 +141,15 @@ def build_html(payload):
     title = escape(getattr(config, "project", "Prévisions météo"))
     page_url = escape(config.github_pages_url, quote=True)
     preview_url = escape(f"{config.github_pages_url}preview.png", quote=True)
+    route_links = "".join(
+        f'<a href="{escape(config.github_pages_base_url)}/{escape(config.route_slug_for(path))}/">'
+        f'{escape(config.route_title_for(path))}</a>'
+        for path in config.list_gpx_files()
+    )
+    menu_html = (
+        f'<a href="{escape(config.github_pages_base_url)}/">Accueil et aide</a>'
+        f'{route_links}'
+    )
     speed = max(100, int(getattr(config, "speed", .5) * 1000))
     return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
@@ -157,8 +166,13 @@ def build_html(payload):
 <style>
 *{{box-sizing:border-box}} html,body{{height:100%;margin:0;overflow:hidden;font-family:system-ui,sans-serif}}
 main{{position:relative;height:100dvh;display:flex;flex-direction:column;background:#171717}} #map{{min-height:0;flex:1}}
-.title{{flex:0 0 auto;background:#18295c;color:white;padding:6px 16px;text-align:center;
+.title{{position:relative;flex:0 0 auto;background:#18295c;color:white;padding:6px 48px;text-align:center;
 font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
+.menu-button{{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:32px;height:28px;border:0;border-radius:6px;
+background:#ffffff20;color:#fff;font-size:20px;line-height:1;cursor:pointer}} .route-menu{{position:absolute;z-index:2000;left:8px;top:38px;
+min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005;text-align:left}}
+.route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}
+.route-menu a:hover{{background:#edf1fa}}
 .leaflet-overlay-pane svg{{z-index:450}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
@@ -171,10 +185,10 @@ text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 .sheet-head{{flex:0 0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin-bottom:4px}}
 .sheet-head h2{{font-size:20px;text-align:center;margin:0;color:#111}}
 .close-details{{border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;cursor:pointer}}
-.daily-strip{{flex:0 0 52px;display:flex;gap:3px;overflow-x:auto;padding:2px 6px;scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
-.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 48px;width:48px;border:0;background:transparent;border-radius:8px;padding:2px;
-display:grid;grid-template-columns:22px 1fr;grid-template-rows:1fr 1fr;place-items:center;color:#70768c;scroll-snap-align:center;cursor:pointer}}
-.daily-choice .daily-icon{{grid-row:1/3;font-size:20px}} .daily-choice .daily-weekday{{font-size:9px}} .daily-choice .daily-number{{font-size:14px;font-weight:800;color:#315bb5}}
+.daily-strip{{flex:0 0 70px;display:flex;gap:3px;overflow-x:auto;padding:3px 6px;scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
+.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 56px;width:56px;border:0;background:transparent;border-radius:8px;padding:2px;
+display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-items:center;color:#70768c;scroll-snap-align:center;cursor:pointer}}
+.daily-choice .daily-icon{{font-size:21px;line-height:1}} .daily-choice .daily-weekday{{font-size:9px;line-height:1}} .daily-choice .daily-number{{font-size:14px;line-height:1;font-weight:800;color:#315bb5}}
 .daily-choice.active{{background:#f6a800;color:#fff}} .daily-choice.active .daily-number{{color:#fff}}
 #details-content{{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}}
 .forecast-chart{{flex:1 1 auto;min-height:125px;background:#fafafd;border-radius:10px;padding:3px;overflow:hidden}} .forecast-chart svg{{display:block;width:100%;height:100%}}
@@ -185,7 +199,7 @@ display:grid;grid-template-columns:22px 1fr;grid-template-rows:1fr 1fr;place-ite
 .detail-source{{flex:0 0 auto;margin:5px 2px 0;text-align:center;font-size:10px;color:#68708c}} .detail-source a{{color:#315bb5;font-weight:700}}
 @media(max-width:600px){{.details-shell{{padding:7px 7px}}.sheet-head h2{{font-size:18px}}.metric-grid{{grid-template-columns:repeat(2,1fr);gap:5px}}
 .metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}}}
-@media(max-height:680px){{.daily-strip{{flex-basis:46px}}.daily-choice{{grid-template-columns:20px 1fr}}.daily-choice .daily-icon{{font-size:18px}}
+@media(max-height:680px){{.daily-strip{{flex-basis:62px}}.daily-choice{{grid-template-rows:24px 12px 18px}}.daily-choice .daily-icon{{font-size:18px}}
 .metric{{min-height:45px}}.detail-source{{margin-top:3px}}}}
 .controls{{height:112px;flex:0 0 112px;background:#18295c;color:#fff;padding:5px 0}}
 .timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:4px}}
@@ -198,12 +212,16 @@ background:transparent;color:#fff;font-size:15px;font-weight:650;scroll-snap-ali
 .strip button.active{{color:#fff;font-weight:850}}
 .map-play{{width:56px;height:56px;border:0;border-radius:50%;background:#352d32e8;color:#fff;font-size:27px;
 display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
-</style></head><body><main><div class="title">{title}</div><div id="map"></div>
+</style></head><body><main><header class="title"><button id="menu-button" class="menu-button" aria-label="Ouvrir le menu">☰</button>{title}</header><nav id="route-menu" class="route-menu" hidden>{menu_html}</nav><div id="map"></div>
 <div class="controls"><div class="timeline"><div class="strip-wrap"><div id="days" class="strip days"></div></div><div class="strip-wrap"><div id="hours" class="strip hours"></div></div></div></div>
 <aside id="details" class="details" hidden><div class="details-shell"><div class="sheet-head"><button id="close-details" class="close-details">Fermer</button><h2 id="details-title"></h2><span></span></div><div id="daily-strip" class="daily-strip"></div><div id="details-content"></div></div></aside>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}},
 weatherNames={{clear:'Ciel dégagé',partly_cloudy:'Éclaircies',cloudy:'Nuageux',fog:'Brouillard',drizzle:'Bruine',rain:'Pluie',snow:'Neige',storm:'Orage',unknown:'Indéterminé'}};
+const menuButton=document.querySelector('#menu-button'),routeMenu=document.querySelector('#route-menu');
+menuButton.onclick=event=>{{event.stopPropagation();routeMenu.hidden=!routeMenu.hidden}};
+document.addEventListener('click',event=>{{if(!routeMenu.contains(event.target)&&event.target!==menuButton)routeMenu.hidden=true}});
+document.addEventListener('keydown',event=>{{if(event.key==='Escape')routeMenu.hidden=true}});
 const map=L.map('map',{{zoomControl:true}});
 const osmAttribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const osm=L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:osmAttribution}}).addTo(map);
