@@ -123,18 +123,26 @@ def build_html(payload):
 <style>
 *{{box-sizing:border-box}} html,body{{height:100%;margin:0;overflow:hidden;font-family:system-ui,sans-serif}}
 main{{height:100dvh;display:flex;flex-direction:column;background:#171717}} #map{{min-height:0;flex:1}}
-.title{{flex:0 0 auto;background:#111;color:white;padding:8px 18px;text-align:center;
-font-weight:800;font-size:clamp(15px,2.3vw,30px);line-height:1.15}}
+.title{{flex:0 0 auto;background:#18295c;color:white;padding:6px 16px;text-align:center;
+font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
 .leaflet-overlay-pane svg{{z-index:450}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
 .temperature{{color:#111;font-size:18px;font-weight:900;white-space:nowrap;
 text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 .weather{{transform:translate(-50%,-50%);font-size:42px;filter:drop-shadow(0 1px 2px white)}}
-.details{{position:absolute;z-index:1000;right:10px;bottom:10px;width:min(290px,calc(100% - 20px));
-background:#fffffff2;color:#171717;border-radius:8px;padding:12px 14px;box-shadow:0 2px 14px #0005;line-height:1.35}}
-.details[hidden]{{display:none}} .details h2{{font-size:17px;margin:0 25px 6px 0}} .details p{{margin:4px 0}}
-.details button{{position:absolute;right:6px;top:5px;border:0;background:none;font-size:20px;cursor:pointer}}
+.details{{position:absolute;z-index:1000;right:12px;bottom:12px;width:min(390px,calc(100% - 24px));max-height:82%;
+overflow:auto;background:#fffffff7;color:#17234d;border-radius:22px;padding:16px;box-shadow:0 8px 30px #0006;line-height:1.3}}
+.details[hidden]{{display:none}} .sheet-head{{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:12px;margin-bottom:12px}}
+.sheet-head h2{{font-size:20px;text-align:center;margin:0;padding-right:70px;color:#111}}
+.close-details{{border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:7px 12px;font-size:13px;cursor:pointer}}
+.detail-summary{{display:flex;align-items:center;justify-content:center;gap:16px;padding:10px 0 16px;border-bottom:1px solid #ddd}}
+.detail-icon{{font-size:52px;line-height:1}} .detail-temperature strong{{display:block;font-size:34px;color:#111}}
+.detail-temperature span{{font-size:13px;color:#69708a}} .metric-grid{{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px}}
+.metric{{min-height:72px;background:#ececf2;border-radius:12px;padding:10px}} .metric-label{{display:block;font-size:12px;color:#68708c;margin-bottom:5px}}
+.metric-value{{display:block;font-size:18px;font-weight:800;color:#17234d}} .detail-source{{margin:13px 2px 0;font-size:11px;color:#68708c}}
+.detail-source a{{color:#315bb5}} @media(max-width:600px){{.details{{position:absolute;left:0;right:0;bottom:0;width:100%;max-height:78%;
+border-radius:24px 24px 0 0;padding:17px 15px}}.sheet-head h2{{font-size:19px;padding-right:58px}}}}
 .controls{{height:112px;flex:0 0 112px;background:#18295c;color:#fff;padding:5px 0}}
 .timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:4px}}
 .strip-wrap{{position:relative;min-width:0;overflow:hidden}} .strip-wrap::after{{content:"";position:absolute;z-index:0;
@@ -147,10 +155,11 @@ background:transparent;color:#fff;font-size:15px;font-weight:650;scroll-snap-ali
 .map-play{{width:56px;height:56px;border:0;border-radius:50%;background:#352d32e8;color:#fff;font-size:27px;
 display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
 </style></head><body><main><div class="title">{title}</div><div id="map">
-<aside id="details" class="details" hidden><button id="close-details" aria-label="Fermer">×</button><div id="details-content"></div></aside></div>
+<aside id="details" class="details" hidden><div class="sheet-head"><button id="close-details" class="close-details">Fermer</button><h2 id="details-title"></h2></div><div id="details-content"></div></aside></div>
 <div class="controls"><div class="timeline"><div class="strip-wrap"><div id="days" class="strip days"></div></div><div class="strip-wrap"><div id="hours" class="strip hours"></div></div></div></div>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
-const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}};
+const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}},
+weatherNames={{clear:'Ciel dégagé',partly_cloudy:'Éclaircies',cloudy:'Nuageux',fog:'Brouillard',drizzle:'Bruine',rain:'Pluie',snow:'Neige',storm:'Orage',unknown:'Indéterminé'}};
 const map=L.map('map',{{zoomControl:true}});
 const osmAttribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const osm=L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:osmAttribution}}).addTo(map);
@@ -195,13 +204,17 @@ function escapeHtml(text){{const node=document.createElement('div');node.textCon
 function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.frames[currentIndex],v=frame.values[id];if(!v)return;
   const source=v.ensemble?'Médiane de 51 scénarios ECMWF':'Modèle local haute résolution';
   const sourceUrl=v.ensemble?'https://open-meteo.com/en/docs/ensemble-api':'https://open-meteo.com/en/docs';
-  const uncertainty=v.ensemble?`<p><b>Plage probable :</b> ${{v.low}} à ${{v.high}}°C</p>`:'';
-  const rainProbability=v.probability===null?'':`<p><b>Probabilité de pluie :</b> ${{v.probability}} %</p>`;
-  const precipitation=v.precipitation>0?`<p><b>Quantité de pluie :</b> ${{v.precipitation}} mm${{v.ensemble?' en moyenne':''}}</p>`:'';
-  document.querySelector('#details-content').innerHTML=`<h2>${{escapeHtml(town.name)}} — ${{frame.label}}</h2>
-  <p><b>Température :</b> ${{v.temperature}}°C</p>${{uncertainty}}${{rainProbability}}${{precipitation}}
-  <p><b>Vent :</b> ${{v.wind}} km/h, direction ${{v.wind_direction}}, rafales ${{v.gusts}} km/h</p><p><small>${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}<br>
-  <a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></small></p>`;
+  const temperatureRange=v.ensemble?`${{v.low}} à ${{v.high}}°C`:`${{v.temperature}}°C`;
+  const rainCard=v.probability===null?'':`<div class="metric"><span class="metric-label">Risque de pluie</span><span class="metric-value">${{v.probability}} %</span></div>`;
+  const precipitationCard=v.precipitation>0?`<div class="metric"><span class="metric-label">Précipitations</span><span class="metric-value">${{v.precipitation}} mm${{v.ensemble?' moy.':''}}</span></div>`:'';
+  document.querySelector('#details-title').textContent=town.name;
+  document.querySelector('#details-content').innerHTML=`<div class="detail-summary"><span class="detail-icon">${{icons[v.weather]}}</span>
+  <div class="detail-temperature"><strong>${{v.temperature}}°C</strong><span>${{frame.label}} · ${{weatherNames[v.weather]}}</span></div></div>
+  <div class="metric-grid"><div class="metric"><span class="metric-label">Températures</span><span class="metric-value">${{temperatureRange}}</span></div>
+  ${{rainCard}}${{precipitationCard}}<div class="metric"><span class="metric-label">Vent</span><span class="metric-value">${{v.wind}} km/h · ${{v.wind_direction}}</span></div>
+  <div class="metric"><span class="metric-label">Rafales</span><span class="metric-value">${{v.gusts}} km/h</span></div></div>
+  <p class="detail-source">${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}<br>
+  <a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></p>`;
   details.hidden=false;
 }}
 function show(i,draggedStrip=null){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
