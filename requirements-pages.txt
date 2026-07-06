@@ -1,4 +1,5 @@
 gpxpy
+geopy
 openmeteo-requests
 requests-cache
 retry-requests
