@@ -214,14 +214,14 @@ display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-i
 .metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}}}
 @media(max-height:680px){{.daily-strip{{flex-basis:62px}}.daily-choice{{grid-template-rows:24px 12px 18px}}.daily-choice .daily-icon{{font-size:18px}}
 .metric{{min-height:45px}}.detail-source{{margin-top:3px}}}}
-.controls{{height:112px;flex:0 0 112px;background:#18295c;color:#fff;padding:5px 0}}
-.timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:4px}}
+.controls{{height:86px;flex:0 0 86px;background:#18295c;color:#fff;padding:2px 0}}
+.timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:0}}
 .strip-wrap{{position:relative;min-width:0;overflow:hidden}} .strip-wrap::after{{content:"";position:absolute;z-index:0;
-left:50%;top:2px;bottom:2px;width:80px;transform:translateX(-50%);border-radius:8px;background:#f6a800;pointer-events:none}}
-.strip{{position:relative;z-index:1;height:100%;display:flex;align-items:stretch;gap:5px;overflow-x:auto;padding:2px calc(50% - 40px);
+left:50%;top:1px;bottom:1px;width:64px;transform:translateX(-50%);border-radius:7px;background:#f6a800;pointer-events:none}}
+.strip{{position:relative;z-index:1;height:100%;display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:1px calc(50% - 32px);
 scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}}
-.strip::-webkit-scrollbar{{display:none}} .strip button{{flex:0 0 80px;width:80px;border:0;border-radius:8px;
-background:transparent;color:#fff;font-size:15px;font-weight:650;scroll-snap-align:center;cursor:pointer;padding:7px 12px}}
+.strip::-webkit-scrollbar{{display:none}} .strip button{{flex:0 0 64px;width:64px;border:0;border-radius:7px;
+background:transparent;color:#fff;font-size:14px;font-weight:650;scroll-snap-align:center;cursor:pointer;padding:3px 6px}}
 .strip button.active{{color:#fff;font-weight:850}}
 .map-play{{width:56px;height:56px;border:0;border-radius:50%;background:#352d32e8;color:#fff;font-size:27px;
 display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
