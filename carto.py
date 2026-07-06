@@ -82,7 +82,13 @@ def make_payload(forecasts, route):
                 "weather": weather_category(row.get("weather_code")),
                 "ensemble": row.get("data_source", "best_match") == "ecmwf_ifs_ensemble",
             }
-        frames.append({"label": format_date_fr(ts), "iso": ts.isoformat(), "values": values})
+        frames.append({
+            "label": format_date_fr(ts),
+            "iso": ts.isoformat(),
+            "day": ts.strftime("%Y-%m-%d"),
+            "day_label": f"{FR_JOURS[ts.weekday()][:3]}. {ts.day}",
+            "values": values,
+        })
     return {"route": route, "towns": towns, "frames": frames}
 
 
@@ -107,7 +113,7 @@ def build_html(payload):
 main{{height:100dvh;display:flex;flex-direction:column;background:#171717}} #map{{min-height:0;flex:1}}
 .title{{flex:0 0 auto;background:#111;color:white;padding:8px 18px;text-align:center;
 font-weight:800;font-size:clamp(15px,2.3vw,30px);line-height:1.15}}
-#date{{display:block;font-size:.72em;margin-top:3px}} .leaflet-overlay-pane svg{{z-index:450}}
+.leaflet-overlay-pane svg{{z-index:450}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
 .temperature{{color:#111;font-size:18px;font-weight:900;white-space:nowrap;
@@ -118,16 +124,17 @@ background:#fffffff2;color:#171717;border-radius:8px;padding:12px 14px;box-shado
 .details[hidden]{{display:none}} .details h2{{font-size:17px;margin:0 25px 6px 0}} .details p{{margin:4px 0}}
 .details button{{position:absolute;right:6px;top:5px;border:0;background:none;font-size:20px;cursor:pointer}}
 .weather-legend{{background:#fffffff0;padding:8px 10px;border-radius:6px;box-shadow:0 1px 5px #0004;line-height:1.35}}
-.controls{{height:86px;flex:0 0 86px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;gap:8px;
+.controls{{height:86px;flex:0 0 86px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:8px;
 align-items:center;padding:7px 14px;color:#fff}} .controls button{{padding:7px 11px}} .timeline{{min-width:0}}
 .timeline input{{width:100%}} .days{{display:flex;gap:4px;overflow-x:auto;height:24px;scrollbar-width:thin}}
 .days button{{flex:1 0 auto;padding:2px 5px;border:0;border-radius:3px;font-size:10px;cursor:pointer}}
+.days button.active{{background:#1677d2;color:#fff;font-weight:800;outline:2px solid #fff}}
 @media(max-width:600px){{.controls{{padding:6px;gap:4px}}.controls button{{padding:6px 8px}}}}
-</style></head><body><main><div class="title">{title}<span id="date"></span></div><div id="map">
+</style></head><body><main><div class="title">{title}</div><div id="map">
 <aside id="details" class="details" hidden><button id="close-details" aria-label="Fermer">×</button><div id="details-content"></div></aside></div>
 <div class="controls"><button id="previous" aria-label="Précédent">◀</button><button id="play" aria-label="Lecture">▶</button>
 <div class="timeline"><input id="slider" type="range" min="0" value="0" step="1"><div id="days" class="days"></div></div>
-<button id="next" aria-label="Suivant">▶</button><span id="counter"></span></div>
+<button id="next" aria-label="Suivant">▶</button></div>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}};
 const map=L.map('map',{{zoomControl:true}});
@@ -148,7 +155,7 @@ className:'meteo-marker',iconSize:[1,1],iconAnchor:[0,0],html:
 `<span class="temperature">–</span><span class="weather"></span>`}})}}).addTo(map);
 marker.on('click',()=>showDetails(town.id));markers[town.id]=marker;}}
 const townById=Object.fromEntries(data.towns.map(t=>[t.id,t]));
-const slider=document.querySelector('#slider'),counter=document.querySelector('#counter'),play=document.querySelector('#play');
+const slider=document.querySelector('#slider'),play=document.querySelector('#play');
 const previous=document.querySelector('#previous'),next=document.querySelector('#next'),details=document.querySelector('#details');
 let currentIndex=0,selectedTownId=null;slider.max=data.frames.length-1;
 function overlap(a,b){{return Math.max(0,Math.min(a.r,b.r)-Math.max(a.l,b.l))*Math.max(0,Math.min(a.b,b.b)-Math.max(a.t,b.t))}}
@@ -181,16 +188,18 @@ function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.f
   <p><b>Vent :</b> ${{v.wind}} km/h, rafales ${{v.gusts}} km/h</p><p><small>${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}</small></p>`;
   details.hidden=false;
 }}
-function show(i){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];document.querySelector('#date').textContent=f.label;
+function show(i){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
   for(const [id,m] of Object.entries(markers)){{const v=f.values[id],e=m.getElement();if(!e||!v)continue;const temp=e.querySelector('.temperature');
     temp.textContent=v.temperature+'°';e.querySelector('.weather').textContent=icons[v.weather];
     e.title=v.ensemble?`${{v.low}} à ${{v.high}}°C (80 % des scénarios)`:'';
   }}
-  slider.value=currentIndex;counter.textContent=`${{currentIndex+1}}/${{data.frames.length}}`;previous.disabled=currentIndex===0;next.disabled=currentIndex===data.frames.length-1;
+  slider.value=currentIndex;previous.disabled=currentIndex===0;next.disabled=currentIndex===data.frames.length-1;
+  const activeDay=days.querySelector(`[data-day="${{f.day}}"]`);days.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeDay));
+  if(activeDay)days.scrollTo({{left:activeDay.offsetLeft-(days.clientWidth-activeDay.offsetWidth)/2,behavior:'smooth'}});
   if(selectedTownId)showDetails(selectedTownId);requestAnimationFrame(layoutLabels);
 }}
-const days=document.querySelector('#days'),seenDays=new Set();data.frames.forEach((frame,index)=>{{const date=new Date(frame.iso),key=date.toLocaleDateString('fr-FR');if(seenDays.has(key))return;seenDays.add(key);
-  const button=document.createElement('button');button.textContent=date.toLocaleDateString('fr-FR',{{weekday:'short',day:'numeric'}});button.onclick=()=>{{stop();show(index)}};days.append(button);
+const days=document.querySelector('#days'),seenDays=new Set();data.frames.forEach((frame,index)=>{{if(seenDays.has(frame.day))return;seenDays.add(frame.day);
+  const button=document.createElement('button');button.dataset.day=frame.day;button.textContent=frame.day_label;button.onclick=()=>{{stop();show(index)}};days.append(button);
 }});
 let timer=null;function stop(){{clearInterval(timer);timer=null;play.textContent='▶'}}function toggle(){{if(timer)return stop();if(currentIndex===data.frames.length-1)show(0);play.textContent='⏸';
   timer=setInterval(()=>{{if(currentIndex>=data.frames.length-1)return stop();show(currentIndex+1)}},{speed});
