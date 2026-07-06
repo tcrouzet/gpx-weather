@@ -36,8 +36,8 @@ weather_cache_hours = 3
 gpx_simplify_degrees = 0.0005
 
 
-# Heures de prévision
-sample_hours = [0, 6, 12, 18]
+# Heures de prévision (24h correspond à 0h le lendemain).
+sample_hours = [0, 6, 10, 14, 16, 20]
 
 # Cadence de lecture du slider HTML.
 speed = 0.5

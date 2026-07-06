@@ -141,7 +141,11 @@ overflow:auto;background:#fffffff7;color:#17234d;border-radius:22px;padding:16px
 .detail-temperature span{{font-size:13px;color:#69708a}} .metric-grid{{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px}}
 .metric{{min-height:72px;background:#ececf2;border-radius:12px;padding:10px}} .metric-label{{display:block;font-size:12px;color:#68708c;margin-bottom:5px}}
 .metric-value{{display:block;font-size:18px;font-weight:800;color:#17234d}} .detail-source{{margin:13px 2px 0;font-size:11px;color:#68708c}}
-.detail-source a{{color:#315bb5}} @media(max-width:600px){{.details{{position:absolute;left:0;right:0;bottom:0;width:100%;max-height:78%;
+.detail-source a{{color:#315bb5}} .trends{{margin-top:18px;border-top:1px solid #ddd;padding-top:12px}} .trends h3{{margin:0 0 10px;font-size:16px}}
+.trend{{margin:12px 0}} .trend-title{{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:12px;color:#68708c}}
+.trend-legend{{display:flex;gap:10px;font-size:10px}} .trend-legend i{{display:inline-block;width:12px;height:3px;vertical-align:middle;margin-right:3px}}
+.chart{{width:100%;background:#f7f7fa;border-radius:10px;overflow:hidden}} .chart svg{{display:block;width:100%;height:auto}}
+@media(max-width:600px){{.details{{position:absolute;left:0;right:0;bottom:0;width:100%;max-height:78%;
 border-radius:24px 24px 0 0;padding:17px 15px}}.sheet-head h2{{font-size:19px;padding-right:58px}}}}
 .controls{{height:112px;flex:0 0 112px;background:#18295c;color:#fff;padding:5px 0}}
 .timeline{{height:100%;display:grid;grid-template-rows:1fr 1fr;gap:4px}}
@@ -201,6 +205,24 @@ function layoutLabels(){{
   }}
 }}
 function escapeHtml(text){{const node=document.createElement('div');node.textContent=String(text);return node.innerHTML}}
+function dayMarkers(width,height,pad){{let previous=null,markup='';data.frames.forEach((frame,index)=>{{if(frame.day===previous)return;previous=frame.day;
+  const x=pad+index/Math.max(1,data.frames.length-1)*(width-pad*2);markup+=`<line x1="${{x}}" y1="8" x2="${{x}}" y2="${{height-20}}" stroke="#dfe1e8"/>
+  <text x="${{x+3}}" y="${{height-6}}" font-size="9" fill="#747b91">${{frame.day_label}}</text>`}});return markup}}
+function lineTrend(id,series){{const width=720,height=145,pad=18,plotBottom=112;
+  const rows=data.frames.map(frame=>frame.values[id]);const all=series.flatMap(item=>rows.map(row=>row?.[item.field])).filter(Number.isFinite);
+  if(!all.length)return '';let min=Math.floor(Math.min(...all)),max=Math.ceil(Math.max(...all));if(min===max)max=min+1;
+  const x=index=>pad+index/Math.max(1,rows.length-1)*(width-pad*2),y=value=>8+(max-value)/(max-min)*(plotBottom-8);
+  const paths=series.map(item=>{{const points=rows.map((row,index)=>Number.isFinite(row?.[item.field])?`${{x(index)}},${{y(row[item.field])}}`:null).filter(Boolean).join(' ');
+    return `<polyline points="${{points}}" fill="none" stroke="${{item.color}}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`}}).join('');
+  const markerX=x(currentIndex),dots=series.map(item=>{{const value=rows[currentIndex]?.[item.field];return Number.isFinite(value)?`<circle cx="${{markerX}}" cy="${{y(value)}}" r="5" fill="${{item.color}}" stroke="white" stroke-width="2"/>`:''}}).join('');
+  return `<div class="chart"><svg viewBox="0 0 ${{width}} ${{height}}" role="img"><text x="2" y="14" font-size="9" fill="#747b91">${{max}}</text>
+  <text x="2" y="${{plotBottom}}" font-size="9" fill="#747b91">${{min}}</text>${{dayMarkers(width,height,pad)}}${{paths}}
+  <line x1="${{markerX}}" y1="8" x2="${{markerX}}" y2="${{plotBottom}}" stroke="#17234d" stroke-dasharray="3 3"/>${{dots}}</svg></div>`}}
+function rainTrend(id){{const width=720,height=125,pad=18,bottom=94,rows=data.frames.map(frame=>frame.values[id]),barWidth=Math.max(2,(width-pad*2)/rows.length*.65);
+  const bars=rows.map((row,index)=>{{const value=Number.isFinite(row?.probability)?row.probability:0,x=pad+index/Math.max(1,rows.length-1)*(width-pad*2),h=value/100*78;
+    return `<rect x="${{x-barWidth/2}}" y="${{bottom-h}}" width="${{barWidth}}" height="${{h}}" rx="2" fill="${{index===currentIndex?'#f6a800':'#4387c5'}}"/>`}}).join('');
+  return `<div class="chart"><svg viewBox="0 0 ${{width}} ${{height}}" role="img"><text x="2" y="14" font-size="9" fill="#747b91">100%</text>
+  ${{dayMarkers(width,height,pad)}}${{bars}}</svg></div>`}}
 function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.frames[currentIndex],v=frame.values[id];if(!v)return;
   const source=v.ensemble?'Médiane de 51 scénarios ECMWF':'Modèle local haute résolution';
   const sourceUrl=v.ensemble?'https://open-meteo.com/en/docs/ensemble-api':'https://open-meteo.com/en/docs';
@@ -213,6 +235,12 @@ function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.f
   <div class="metric-grid"><div class="metric"><span class="metric-label">Températures</span><span class="metric-value">${{temperatureRange}}</span></div>
   ${{rainCard}}${{precipitationCard}}<div class="metric"><span class="metric-label">Vent</span><span class="metric-value">${{v.wind}} km/h · ${{v.wind_direction}}</span></div>
   <div class="metric"><span class="metric-label">Rafales</span><span class="metric-value">${{v.gusts}} km/h</span></div></div>
+  <section class="trends"><h3>Tendances sur toute la période</h3>
+  <div class="trend"><div class="trend-title"><span>Température (°C)</span><span class="trend-legend"><span><i style="background:#ef4444"></i>température</span></span></div>
+  ${{lineTrend(id,[{{field:'temperature',color:'#ef4444'}}])}}</div>
+  <div class="trend"><div class="trend-title"><span>Vent (km/h)</span><span class="trend-legend"><span><i style="background:#315bb5"></i>vent</span><span><i style="background:#f6a800"></i>rafales</span></span></div>
+  ${{lineTrend(id,[{{field:'wind',color:'#315bb5'}},{{field:'gusts',color:'#f6a800'}}])}}</div>
+  <div class="trend"><div class="trend-title"><span>Probabilité de pluie</span></div>${{rainTrend(id)}}</div></section>
   <p class="detail-source">${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}<br>
   <a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></p>`;
   details.hidden=false;
