@@ -197,12 +197,13 @@ text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 .sheet-head h2{{position:absolute;left:50%;width:70%;transform:translateX(-50%);font-size:20px;text-align:center;margin:0;color:#111}}
 .close-details{{position:absolute;z-index:1;left:0;top:50%;transform:translateY(-50%);border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;cursor:pointer}}
 .daily-strip{{flex:0 0 70px;display:flex;gap:0;overflow-x:auto;padding:3px 0;scrollbar-width:none;scroll-snap-type:x mandatory;border-bottom:1px solid #ddd}}
-.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 48px;width:48px;border:0;background:transparent;border-radius:8px;padding:2px 0;
+.daily-strip::-webkit-scrollbar{{display:none}} .daily-choice{{flex:0 0 40px;width:40px;border:0;background:transparent;border-radius:8px;padding:2px 0;
 display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-items:center;color:#70768c;scroll-snap-align:center;cursor:pointer}}
 .daily-choice .daily-icon{{font-size:21px;line-height:1}} .daily-choice .daily-weekday{{font-size:9px;line-height:1}} .daily-choice .daily-number{{font-size:14px;line-height:1;font-weight:800;color:#315bb5}}
 .daily-choice.active{{background:#f6a800;color:#fff}} .daily-choice.active .daily-number{{color:#fff}}
 #details-content{{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}}
-.forecast-chart{{flex:1 1 0;min-height:0;background:#fafafd;border-radius:10px;overflow:hidden}} .forecast-chart svg{{display:block;width:100%;height:100%}}
+.forecast-chart{{flex:1 1 0;min-height:0;background:#fafafd;border-radius:10px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}}
+.forecast-chart::-webkit-scrollbar{{display:none}} .forecast-chart svg{{display:block;max-width:none;height:100%}}
 .metric-grid{{flex:0 0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}}
 .metric{{min-height:58px;background:#ececf2;border-radius:9px;padding:7px 9px}} .metric-label{{display:block;font-size:10px;color:#68708c;margin-bottom:3px}}
 .metric-value{{display:block;font-size:15px;font-weight:800;color:#17234d}} .metric.temperature-card{{background:#ff4b4f}} .metric.gust-card{{background:#55c94c}}
@@ -276,10 +277,10 @@ function layoutLabels(){{
   }}
 }}
 function escapeHtml(text){{const node=document.createElement('div');node.textContent=String(text);return node.innerHTML}}
-function dailyChart(town,selectedIndex){{const rows=town.daily,width=820,height=350,pad=16,tempTop=24,tempBottom=190,windBase=300;
+function dailyChart(town,selectedIndex){{const rows=town.daily,columnWidth=40,width=rows.length*columnWidth,height=350,tempTop=24,tempBottom=190,windBase=300;
   const temperatures=rows.flatMap(row=>[row.temperature_min,row.temperature_max]),tempMin=Math.floor(Math.min(...temperatures)-1),tempMax=Math.ceil(Math.max(...temperatures)+1);
-  const maxWind=Math.max(1,...rows.map(row=>row.wind)),x=index=>pad+index/Math.max(1,rows.length-1)*(width-pad*2);
-  const yTemp=value=>tempTop+(tempMax-value)/(tempMax-tempMin)*(tempBottom-tempTop),barWidth=Math.min(28,(width-pad*2)/rows.length*.55);
+  const maxWind=Math.max(1,...rows.map(row=>row.wind)),x=index=>columnWidth/2+index*columnWidth;
+  const yTemp=value=>tempTop+(tempMax-value)/(tempMax-tempMin)*(tempBottom-tempTop),barWidth=24;
   const maxPoints=rows.map((row,index)=>`${{x(index)}},${{yTemp(row.temperature_max)}}`).join(' '),minPoints=rows.map((row,index)=>`${{x(index)}},${{yTemp(row.temperature_min)}}`).join(' ');
   const columns=rows.map((row,index)=>{{const px=x(index),barHeight=row.wind/maxWind*78,selected=index===selectedIndex;
     return `<rect x="${{px-barWidth/2}}" y="18" width="${{barWidth}}" height="${{windBase+6}}" rx="3" fill="${{selected?'#c9cdd6':'#eef0f4'}}" opacity="${{selected?.75:.7}}"/>
@@ -289,7 +290,7 @@ function dailyChart(town,selectedIndex){{const rows=town.daily,width=820,height=
     <text x="${{px}}" y="${{height-7}}" text-anchor="middle" font-size="10" fill="#70768c">${{row.weekday}} ${{row.day}}</text>`}}).join('');
   const labels=rows.map((row,index)=>`<text x="${{x(index)}}" y="${{yTemp(row.temperature_max)-7}}" text-anchor="middle" font-size="10" fill="#ef4444">${{row.temperature_max}}</text>
   <text x="${{x(index)}}" y="${{yTemp(row.temperature_min)+14}}" text-anchor="middle" font-size="10" fill="#3182ce">${{row.temperature_min}}</text>`).join('');
-  return `<div class="forecast-chart"><svg viewBox="0 0 ${{width}} ${{height}}" preserveAspectRatio="none" role="img">${{columns}}
+  return `<div class="forecast-chart"><svg style="width:${{width}}px" viewBox="0 0 ${{width}} ${{height}}" preserveAspectRatio="none" role="img">${{columns}}
   <polyline points="${{maxPoints}}" fill="none" stroke="#ef4444" stroke-width="4" stroke-linejoin="round"/> <polyline points="${{minPoints}}" fill="none" stroke="#3182ce" stroke-width="4" stroke-linejoin="round"/>
   ${{labels}}</svg></div>`}}
 function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById[id];if(!town?.daily.length)return;
@@ -298,8 +299,10 @@ function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById
   const sourceUrl=selected.ensemble?'https://open-meteo.com/en/docs/ensemble-api':'https://open-meteo.com/en/docs';document.querySelector('#details-title').textContent=town.name;
   const dailyStrip=document.querySelector('#daily-strip');dailyStrip.innerHTML=town.daily.map((row,index)=>`<button class="daily-choice ${{index===selectedIndex?'active':''}}" data-date="${{row.date}}">
   <span class="daily-icon">${{icons[row.weather]}}</span><span class="daily-weekday">${{row.weekday}}</span><span class="daily-number">${{String(row.day).padStart(2,'0')}}</span></button>`).join('');
-  dailyStrip.querySelectorAll('button').forEach(button=>button.onclick=()=>showDetails(id,button.dataset.date));let dailyScrollTimer,dailyUserScroll=false;
-  const armDailyScroll=()=>{{dailyUserScroll=true}};dailyStrip.onpointerdown=armDailyScroll;dailyStrip.ontouchstart=armDailyScroll;dailyStrip.onscroll=()=>{{if(!dailyUserScroll)return;clearTimeout(dailyScrollTimer);dailyScrollTimer=setTimeout(()=>{{
+  dailyStrip.querySelectorAll('button').forEach(button=>button.onclick=()=>showDetails(id,button.dataset.date));let dailyScrollTimer,dailyUserScroll=false,chartScroll=null;
+  const armDailyScroll=()=>{{dailyUserScroll=true}};dailyStrip.onpointerdown=armDailyScroll;dailyStrip.ontouchstart=armDailyScroll;dailyStrip.onscroll=()=>{{
+    if(chartScroll&&Math.abs(chartScroll.scrollLeft-dailyStrip.scrollLeft)>1)chartScroll.scrollLeft=dailyStrip.scrollLeft;
+    if(!dailyUserScroll)return;clearTimeout(dailyScrollTimer);dailyScrollTimer=setTimeout(()=>{{
     const center=dailyStrip.scrollLeft+dailyStrip.clientWidth/2,buttons=[...dailyStrip.querySelectorAll('button')],closest=buttons.reduce((best,button)=>Math.abs(button.offsetLeft+button.offsetWidth/2-center)<Math.abs(best.offsetLeft+best.offsetWidth/2-center)?button:best,buttons[0]);
     dailyUserScroll=false;if(closest&&!closest.classList.contains('active'))showDetails(id,closest.dataset.date);
   }},160)}};requestAnimationFrame(()=>{{const active=dailyStrip.querySelector('.active');if(active)dailyStrip.scrollTo({{left:active.offsetLeft-(dailyStrip.clientWidth-active.offsetWidth)/2,behavior:'smooth'}})}});
@@ -312,6 +315,8 @@ function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById
   <div class="metric wind-card"><span class="metric-label">Vent maximal</span><span class="metric-value">${{selected.wind}} km/h · ${{selected.wind_direction}}</span></div>
   <div class="metric gust-card"><span class="metric-label">Rafales</span><span class="metric-value">${{selected.gusts}} km/h</span></div></div>
   <p class="detail-source"><a href="${{sourceUrl}}" target="_blank" rel="noopener">${{source}}</a>${{selected.ensemble?' — incertitude croissante avec l’échéance.':''}}</p>`;
+  chartScroll=document.querySelector('.forecast-chart');chartScroll.onpointerdown=armDailyScroll;chartScroll.ontouchstart=armDailyScroll;
+  chartScroll.onscroll=()=>{{if(Math.abs(dailyStrip.scrollLeft-chartScroll.scrollLeft)>1)dailyStrip.scrollLeft=chartScroll.scrollLeft}};
   details.hidden=false;document.querySelector('main').classList.add('details-open');
 }}
 function show(i,draggedStrip=null){{if(!data.frames.length)return;currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
