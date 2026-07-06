@@ -182,20 +182,47 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     wind = member_matrix("wind_speed_10m")
     gusts = member_matrix("wind_gusts_10m")
 
+    # L'API peut completer la fin de la plage demandee avec des lignes dont
+    # tous les membres sont absents. Elles ne constituent pas une prevision
+    # et doivent etre retirees avant les aggregations et le calcul du mode.
+    valid = np.isfinite(temperature).any(axis=1)
+    result = result.loc[valid].reset_index(drop=True)
+    temperature = temperature[valid]
+    precipitation = precipitation[valid]
+    weather_codes = weather_codes[valid]
+    wind = wind[valid]
+    gusts = gusts[valid]
+
     result["temperature"] = np.nanmedian(temperature, axis=1)
     result["temperature_low"] = np.nanquantile(temperature, .10, axis=1)
     result["temperature_high"] = np.nanquantile(temperature, .90, axis=1)
     # Pour les precipitations, la mediane vaut souvent 0 mm des que moins de
     # la moitie des membres prevoient de la pluie. La moyenne d'ensemble est
     # plus informative et reste coherente avec la probabilite affichee.
-    result["precipitation"] = np.nanmean(precipitation, axis=1)
-    result["precipitation_probability"] = np.nanmean(precipitation >= .1, axis=1) * 100
-    result["wind_speed"] = np.nanmedian(wind, axis=1)
-    result["wind_gusts"] = np.nanmedian(gusts, axis=1)
+    precipitation_count = np.isfinite(precipitation).sum(axis=1)
+    result["precipitation"] = np.divide(
+        np.nansum(precipitation, axis=1), precipitation_count,
+        out=np.zeros(len(precipitation)), where=precipitation_count > 0,
+    )
+    rainy_count = np.sum(np.isfinite(precipitation) & (precipitation >= .1), axis=1)
+    result["precipitation_probability"] = np.divide(
+        rainy_count * 100.0, precipitation_count,
+        out=np.zeros(len(precipitation)), where=precipitation_count > 0,
+    )
+
+    def median_or_zero(matrix):
+        return np.array([
+            np.nanmedian(row) if np.isfinite(row).any() else 0.0 for row in matrix
+        ])
+
+    result["wind_speed"] = median_or_zero(wind)
+    result["wind_gusts"] = median_or_zero(gusts)
     # Code majoritaire parmi les 51 scénarios, uniquement pour le pictogramme.
-    result["weather_code"] = [
-        pd.Series(row).dropna().astype(int).mode().iloc[0] for row in weather_codes
-    ]
+    def modal_weather_code(row):
+        modes = pd.Series(row).dropna().astype(int).mode()
+        return modes.iloc[0] if not modes.empty else np.nan
+
+    result["weather_code"] = [modal_weather_code(row) for row in weather_codes]
     result["data_source"] = "ecmwf_ifs_ensemble"
     result["lat"], result["lon"] = lat, lon
     return result
