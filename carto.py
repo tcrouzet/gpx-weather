@@ -186,8 +186,7 @@ min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 
 .route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}
 .route-menu a:hover{{background:#edf1fa}}
 .leaflet-overlay-pane svg{{z-index:450}}
-.route-arrow{{background:transparent;border:0}} .route-arrow span{{position:relative;display:block;width:16px;height:16px;filter:drop-shadow(0 0 1px #fff)}}
-.route-arrow span::before{{content:"";position:absolute;left:3px;top:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:13px solid #d62728}}
+.route-arrow{{background:transparent;border:0}} .route-arrow svg{{display:block;overflow:visible}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
 .temperature{{color:#111;font-size:18px;font-weight:900;white-space:nowrap;
@@ -260,7 +259,9 @@ function addRouteArrows(points){{
     let i=1;while(i<cumulative.length&&cumulative[i]<target)i++;if(i>=points.length)break;
     const segment=cumulative[i]-cumulative[i-1],ratio=segment?(target-cumulative[i-1])/segment:0,a=points[i-1],b=points[i];
     const position=[a[0]+(b[0]-a[0])*ratio,a[1]+(b[1]-a[1])*ratio],angle=bearing(a,b);
-    L.marker(position,{{interactive:false,keyboard:false,icon:L.divIcon({{className:'route-arrow',iconSize:[16,16],iconAnchor:[8,8],html:`<span style="transform:rotate(${{angle}}deg)"></span>`}})}}).addTo(map);
+    const arrowPath='<path d="M14 24V5M5 13l9-9 9 9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    const arrowSvg=`<svg width="28" height="28" viewBox="0 0 28 28" style="transform:rotate(${{angle}}deg)"><g stroke="#fff" stroke-width="8">${{arrowPath}}</g><g stroke="#d62728" stroke-width="4">${{arrowPath}}</g></svg>`;
+    L.marker(position,{{interactive:false,keyboard:false,icon:L.divIcon({{className:'route-arrow',iconSize:[28,28],iconAnchor:[14,14],html:arrowSvg}})}}).addTo(map);
   }}
 }}
 addRouteArrows(data.route);
