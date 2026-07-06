@@ -179,8 +179,8 @@ def build_html(payload):
 main{{position:relative;height:100dvh;display:flex;flex-direction:column;background:#171717}} #map{{min-height:0;flex:1}}
 .title{{position:relative;flex:0 0 auto;background:#18295c;color:white;padding:6px 48px;text-align:center;
 font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
-.menu-button{{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:42px;height:32px;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;display:grid;place-items:center}}
-.menu-button::before{{content:"";width:25px;height:3px;border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
+.menu-button{{position:absolute;left:4px;top:0;bottom:0;margin:auto;width:42px;height:32px;padding:0;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;appearance:none;-webkit-appearance:none}}
+.menu-button::before{{content:"";position:absolute;left:50%;top:50%;width:25px;height:3px;transform:translate(-50%,-50%);border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
 .route-menu{{position:absolute;z-index:2000;left:8px;top:38px;
 min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005;text-align:left}}
 .route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}

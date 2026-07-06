@@ -76,8 +76,8 @@ def write_routes_index(routes):
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>*{{box-sizing:border-box}}body{{margin:0;background:#f4f6fa;color:#17234d;font-family:system-ui,sans-serif}}
 .title{{position:relative;background:#18295c;color:#fff;padding:7px 48px;text-align:center;font-size:clamp(14px,1.7vw,22px);font-weight:800;line-height:1.1}}
-.menu-button{{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:42px;height:32px;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;display:grid;place-items:center}}
-.menu-button::before{{content:"";width:25px;height:3px;border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
+.menu-button{{position:absolute;left:4px;top:0;bottom:0;margin:auto;width:42px;height:32px;padding:0;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;appearance:none;-webkit-appearance:none}}
+.menu-button::before{{content:"";position:absolute;left:50%;top:50%;width:25px;height:3px;transform:translate(-50%,-50%);border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
 .route-menu{{position:absolute;z-index:10;left:8px;top:38px;min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005}}
 .route-menu[hidden]{{display:none}}.route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}.route-menu a:hover{{background:#edf1fa}}
 .content{{width:min(720px,100%);margin:auto;padding:24px 18px 40px}}h1{{font-size:25px;margin:0 0 16px}}h2{{font-size:19px;margin:28px 0 10px}}
