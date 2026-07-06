@@ -86,7 +86,8 @@ def make_payload(forecasts, route):
             "label": format_date_fr(ts),
             "iso": ts.isoformat(),
             "day": ts.strftime("%Y-%m-%d"),
-            "day_label": f"{FR_JOURS[ts.weekday()][:3]}. {ts.day}",
+            "day_label": f"{FR_JOURS[ts.weekday()][:3]} {ts.day}",
+            "hour_label": f"{ts.hour}h",
             "values": values,
         })
     return {"route": route, "towns": towns, "frames": frames}
@@ -123,17 +124,19 @@ text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 background:#fffffff2;color:#171717;border-radius:8px;padding:12px 14px;box-shadow:0 2px 14px #0005;line-height:1.35}}
 .details[hidden]{{display:none}} .details h2{{font-size:17px;margin:0 25px 6px 0}} .details p{{margin:4px 0}}
 .details button{{position:absolute;right:6px;top:5px;border:0;background:none;font-size:20px;cursor:pointer}}
-.weather-legend{{background:#fffffff0;padding:8px 10px;border-radius:6px;box-shadow:0 1px 5px #0004;line-height:1.35}}
 .controls{{height:86px;flex:0 0 86px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:8px;
 align-items:center;padding:7px 14px;color:#fff}} .controls button{{padding:7px 11px}} .timeline{{min-width:0}}
-.timeline input{{width:100%}} .days{{display:flex;gap:4px;overflow-x:auto;height:24px;scrollbar-width:thin}}
+.slider-row{{position:relative;height:34px}} .timeline input{{position:absolute;left:0;top:50%;transform:translateY(-50%);width:100%;margin:0}}
+.hour-bubble{{position:absolute;top:50%;width:30px;height:30px;display:grid;place-items:center;transform:translate(-50%,-50%);
+border-radius:50%;background:#1677d2;color:#fff;font-size:10px;font-weight:800;pointer-events:none;z-index:2;box-shadow:0 0 0 2px #fff}}
+.days{{display:flex;gap:4px;overflow-x:auto;height:24px;scrollbar-width:thin}}
 .days button{{flex:1 0 auto;padding:2px 5px;border:0;border-radius:3px;font-size:10px;cursor:pointer}}
 .days button.active{{background:#1677d2;color:#fff;font-weight:800;outline:2px solid #fff}}
 @media(max-width:600px){{.controls{{padding:6px;gap:4px}}.controls button{{padding:6px 8px}}}}
 </style></head><body><main><div class="title">{title}</div><div id="map">
 <aside id="details" class="details" hidden><button id="close-details" aria-label="Fermer">×</button><div id="details-content"></div></aside></div>
 <div class="controls"><button id="previous" aria-label="Précédent">◀</button><button id="play" aria-label="Lecture">▶</button>
-<div class="timeline"><input id="slider" type="range" min="0" value="0" step="1"><div id="days" class="days"></div></div>
+<div class="timeline"><div class="slider-row"><input id="slider" type="range" min="0" value="0" step="1"><output id="hour-bubble" class="hour-bubble"></output></div><div id="days" class="days"></div></div>
 <button id="next" aria-label="Suivant">▶</button></div>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}};
@@ -147,8 +150,6 @@ const voyager=L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyag
 const topo=L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',{{subdomains:'abc',maxZoom:17,
   attribution:osmAttribution+' | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'}});
 L.control.layers({{'OSM classique':osm,'Carte claire':positron,'Voyager':voyager,'Topographique':topo}},null,{{collapsed:true}}).addTo(map);
-const legend=L.control({{position:'bottomleft'}});legend.onAdd=()=>{{const div=L.DomUtil.create('div','weather-legend');div.innerHTML=
-`<b>Prévisions</b><br><small>J0–J4 : modèle local<br>J5–J15 : médiane ECMWF<br>Cliquez sur une icône pour plus d’informations</small>`;return div}};legend.addTo(map);
 const route=L.polyline(data.route,{{color:'#d62728',weight:4,opacity:.9}}).addTo(map); map.fitBounds(route.getBounds(),{{padding:[35,35]}});
 const markers={{}}; for(const town of data.towns){{const marker=L.marker([town.lat,town.lon],{{icon:L.divIcon({{
 className:'meteo-marker',iconSize:[1,1],iconAnchor:[0,0],html:
@@ -157,6 +158,7 @@ marker.on('click',()=>showDetails(town.id));markers[town.id]=marker;}}
 const townById=Object.fromEntries(data.towns.map(t=>[t.id,t]));
 const slider=document.querySelector('#slider'),play=document.querySelector('#play');
 const previous=document.querySelector('#previous'),next=document.querySelector('#next'),details=document.querySelector('#details');
+const hourBubble=document.querySelector('#hour-bubble');
 let currentIndex=0,selectedTownId=null;slider.max=data.frames.length-1;
 function overlap(a,b){{return Math.max(0,Math.min(a.r,b.r)-Math.max(a.l,b.l))*Math.max(0,Math.min(a.b,b.b)-Math.max(a.t,b.t))}}
 function layoutLabels(){{
@@ -180,12 +182,14 @@ function layoutLabels(){{
 function escapeHtml(text){{const node=document.createElement('div');node.textContent=String(text);return node.innerHTML}}
 function showDetails(id){{selectedTownId=id;const town=townById[id],frame=data.frames[currentIndex],v=frame.values[id];if(!v)return;
   const source=v.ensemble?'Médiane de 51 scénarios ECMWF':'Modèle local haute résolution';
+  const sourceUrl=v.ensemble?'https://open-meteo.com/en/docs/ensemble-api':'https://open-meteo.com/en/docs';
   const uncertainty=v.ensemble?`<p><b>Plage probable :</b> ${{v.low}} à ${{v.high}}°C</p>`:'';
   const rainProbability=v.probability===null?'':`<p><b>Probabilité de pluie :</b> ${{v.probability}} %</p>`;
   const precipitation=v.precipitation>0?`<p><b>Quantité de pluie :</b> ${{v.precipitation}} mm${{v.ensemble?' en moyenne':''}}</p>`:'';
   document.querySelector('#details-content').innerHTML=`<h2>${{escapeHtml(town.name)}} — ${{frame.label}}</h2>
   <p><b>Température :</b> ${{v.temperature}}°C</p>${{uncertainty}}${{rainProbability}}${{precipitation}}
-  <p><b>Vent :</b> ${{v.wind}} km/h, rafales ${{v.gusts}} km/h</p><p><small>${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}</small></p>`;
+  <p><b>Vent :</b> ${{v.wind}} km/h, rafales ${{v.gusts}} km/h</p><p><small>${{source}}${{v.ensemble?' — incertitude croissante avec l’échéance.':''}}<br>
+  <a href="${{sourceUrl}}" target="_blank" rel="noopener">Source des données météo</a></small></p>`;
   details.hidden=false;
 }}
 function show(i){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
@@ -194,9 +198,13 @@ function show(i){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));cons
     e.title=v.ensemble?`${{v.low}} à ${{v.high}}°C (80 % des scénarios)`:'';
   }}
   slider.value=currentIndex;previous.disabled=currentIndex===0;next.disabled=currentIndex===data.frames.length-1;
+  hourBubble.textContent=f.hour_label;updateHourBubble();
   const activeDay=days.querySelector(`[data-day="${{f.day}}"]`);days.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeDay));
   if(activeDay)days.scrollTo({{left:activeDay.offsetLeft-(days.clientWidth-activeDay.offsetWidth)/2,behavior:'smooth'}});
   if(selectedTownId)showDetails(selectedTownId);requestAnimationFrame(layoutLabels);
+}}
+function updateHourBubble(){{const ratio=currentIndex/Math.max(1,data.frames.length-1),thumb=16;width=slider.clientWidth;
+  hourBubble.style.left=`${{thumb/2+ratio*Math.max(0,width-thumb)}}px`;
 }}
 const days=document.querySelector('#days'),seenDays=new Set();data.frames.forEach((frame,index)=>{{if(seenDays.has(frame.day))return;seenDays.add(frame.day);
   const button=document.createElement('button');button.dataset.day=frame.day;button.textContent=frame.day_label;button.onclick=()=>{{stop();show(index)}};days.append(button);
@@ -207,7 +215,7 @@ let timer=null;function stop(){{clearInterval(timer);timer=null;play.textContent
 slider.oninput=()=>{{stop();show(+slider.value)}};play.onclick=toggle;previous.onclick=()=>{{stop();show(currentIndex-1)}};next.onclick=()=>{{stop();show(currentIndex+1)}};
 document.querySelector('#close-details').onclick=()=>{{details.hidden=true;selectedTownId=null}};
 document.addEventListener('keydown',event=>{{if(event.key==='ArrowLeft')previous.click();if(event.key==='ArrowRight')next.click();if(event.key===' '){{event.preventDefault();toggle()}}}});
-map.on('zoomend moveend resize',layoutLabels);map.whenReady(()=>show(0));
+map.on('zoomend moveend resize',layoutLabels);window.addEventListener('resize',updateHourBubble);map.whenReady(()=>show(0));
 </script></body></html>"""
 
 
