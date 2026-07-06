@@ -39,6 +39,7 @@ jobs:
         run: |
           mkdir -p _site
           cp _output/index.html _site/index.html
+          cp webapp/manifest.webmanifest webapp/sw.js webapp/icon-192.png webapp/icon-512.png webapp/apple-touch-icon.png _site/
           for page in _output/*/index.html; do
             slug="$(basename "$(dirname "$page")")"
             mkdir -p "_site/$slug"

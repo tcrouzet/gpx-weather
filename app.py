@@ -63,6 +63,8 @@ def publish_pages():
 def write_routes_index(routes):
     """Crée l'accueil Pages avec l'aide et la liste des parcours."""
     os.makedirs(config.output_root, exist_ok=True)
+    for asset in ("manifest.webmanifest", "sw.js", "icon-192.png", "icon-512.png", "apple-touch-icon.png"):
+        shutil.copy2(os.path.join(config.BASE_DIR, "webapp", asset), config.output_root)
     route_links = "".join(
         f'<a href="{escape(slug)}/">{escape(title)}</a>'
         for slug, title in routes
@@ -70,6 +72,8 @@ def write_routes_index(routes):
     menu = f'<a href="./">Accueil et aide</a>{route_links}'
     html = f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GPX Weather</title>
+<meta name="theme-color" content="#18295c"><meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>*{{box-sizing:border-box}}body{{margin:0;background:#f4f6fa;color:#17234d;font-family:system-ui,sans-serif}}
 .title{{position:relative;background:#18295c;color:#fff;padding:7px 48px;text-align:center;font-size:clamp(14px,1.7vw,22px);font-weight:800;line-height:1.1}}
 .menu-button{{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:32px;height:28px;border:0;border-radius:6px;background:#ffffff20;color:#fff;font-size:20px;line-height:1;cursor:pointer}}
@@ -89,7 +93,8 @@ li{{margin:.55rem 0;line-height:1.4}}</style></head><body>
 <script>const button=document.querySelector('#menu-button'),menu=document.querySelector('#route-menu');
 button.onclick=event=>{{event.stopPropagation();menu.hidden=!menu.hidden}};
 document.addEventListener('click',event=>{{if(!menu.contains(event.target)&&event.target!==button)menu.hidden=true}});
-document.addEventListener('keydown',event=>{{if(event.key==='Escape')menu.hidden=true}});</script></body></html>'''
+document.addEventListener('keydown',event=>{{if(event.key==='Escape')menu.hidden=true}});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script></body></html>'''
     with open(os.path.join(config.output_root, "index.html"), "w", encoding="utf-8") as handle:
         handle.write(html)
 

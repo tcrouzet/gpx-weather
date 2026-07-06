@@ -4,7 +4,9 @@
 import json
 import math
 import os
+from datetime import datetime
 from html import escape
+from zoneinfo import ZoneInfo
 
 import gpxpy
 import pandas as pd
@@ -61,11 +63,15 @@ def load_data():
 
 def selected_times(forecasts):
     hours = set(config.sample_hours)
+    current_hour = pd.Timestamp(datetime.now(ZoneInfo("Europe/Paris"))).floor("h")
     return [pd.Timestamp(t) for t in sorted(forecasts["time"].unique())
-            if pd.Timestamp(t).hour in hours and pd.Timestamp(t).minute == 0]
+            if pd.Timestamp(t) >= current_hour
+            and pd.Timestamp(t).hour in hours and pd.Timestamp(t).minute == 0]
 
 
 def make_payload(forecasts, route):
+    current_hour = pd.Timestamp(datetime.now(ZoneInfo("Europe/Paris"))).floor("h")
+    forecasts = forecasts[forecasts["time"] >= current_hour].copy()
     towns_frame = (forecasts.sort_values("time").drop_duplicates("point_index")
                    .sort_values("point_index"))
     day_abbreviations = ["LU", "MA", "ME", "JE", "VE", "SA", "DI"]
@@ -162,6 +168,11 @@ def build_html(payload):
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Aperçu des prévisions météo du parcours {title}">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#18295c"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="{escape(config.github_pages_base_url)}/manifest.webmanifest">
+<link rel="icon" href="{escape(config.github_pages_base_url)}/icon-192.png">
+<link rel="apple-touch-icon" href="{escape(config.github_pages_base_url)}/apple-touch-icon.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 *{{box-sizing:border-box}} html,body{{height:100%;margin:0;overflow:hidden;font-family:system-ui,sans-serif}}
@@ -216,7 +227,9 @@ display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
 <div class="controls"><div class="timeline"><div class="strip-wrap"><div id="days" class="strip days"></div></div><div class="strip-wrap"><div id="hours" class="strip hours"></div></div></div></div>
 <aside id="details" class="details" hidden><div class="details-shell"><div class="sheet-head"><button id="close-details" class="close-details">Fermer</button><h2 id="details-title"></h2><span></span></div><div id="daily-strip" class="daily-strip"></div><div id="details-content"></div></div></aside>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
-const data={data}, icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}},
+const data={data},currentHour=new Date();currentHour.setMinutes(0,0,0);
+data.frames=data.frames.filter(frame=>new Date(frame.iso)>=currentHour);
+const icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}},
 weatherNames={{clear:'Ciel dégagé',partly_cloudy:'Éclaircies',cloudy:'Nuageux',fog:'Brouillard',drizzle:'Bruine',rain:'Pluie',snow:'Neige',storm:'Orage',unknown:'Indéterminé'}};
 const menuButton=document.querySelector('#menu-button'),routeMenu=document.querySelector('#route-menu');
 menuButton.onclick=event=>{{event.stopPropagation();routeMenu.hidden=!routeMenu.hidden}};
@@ -301,12 +314,12 @@ function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById
   <p class="detail-source"><a href="${{sourceUrl}}" target="_blank" rel="noopener">${{source}}</a>${{selected.ensemble?' — incertitude croissante avec l’échéance.':''}}</p>`;
   details.hidden=false;document.querySelector('main').classList.add('details-open');
 }}
-function show(i,draggedStrip=null){{currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
+function show(i,draggedStrip=null){{if(!data.frames.length)return;currentIndex=Math.max(0,Math.min(data.frames.length-1,i));const f=data.frames[currentIndex];
   for(const [id,m] of Object.entries(markers)){{const v=f.values[id],e=m.getElement();if(!e||!v)continue;const temp=e.querySelector('.temperature');
     temp.textContent=v.temperature+'°';e.querySelector('.weather').textContent=icons[v.weather];
     e.title=v.ensemble?`${{v.low}} à ${{v.high}}°C (80 % des scénarios)`:'';
   }}
-  const activeDay=days.querySelector(`[data-day="${{f.day}}"]`),activeHour=hours.querySelector(`[data-hour="${{f.hour}}"]`);
+  renderHours(f.day);const activeDay=days.querySelector(`[data-day="${{f.day}}"]`),activeHour=hours.querySelector(`[data-hour="${{f.hour}}"]`);
   days.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeDay));
   hours.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeHour));
   if(draggedStrip!==days)centerChoice(days,activeDay);if(draggedStrip!==hours)centerChoice(hours,activeHour);
@@ -320,9 +333,11 @@ function indexFor(day,hour){{const exact=data.frames.findIndex(frame=>frame.day=
 const seenDays=new Set();data.frames.forEach(frame=>{{if(seenDays.has(frame.day))return;seenDays.add(frame.day);const button=document.createElement('button');
   button.dataset.day=frame.day;button.textContent=frame.day_label;button.onclick=()=>{{stop();show(indexFor(frame.day,data.frames[currentIndex].hour))}};days.append(button);
 }});
-const uniqueHours=[...new Set(data.frames.map(frame=>frame.hour))].sort((a,b)=>a-b);uniqueHours.forEach(hour=>{{const button=document.createElement('button');
-  button.dataset.hour=hour;button.textContent=`${{String(hour).padStart(2,'0')}}:00`;button.onclick=()=>{{stop();show(indexFor(data.frames[currentIndex].day,hour))}};hours.append(button);
-}});
+function renderHours(day){{const available=[...new Set(data.frames.filter(frame=>frame.day===day).map(frame=>frame.hour))].sort((a,b)=>a-b);
+  const displayed=[...hours.querySelectorAll('button')].map(button=>Number(button.dataset.hour));if(displayed.join(',')===available.join(','))return;
+  hours.replaceChildren();available.forEach(hour=>{{const button=document.createElement('button');button.dataset.hour=hour;
+    button.textContent=`${{String(hour).padStart(2,'0')}}:00`;button.onclick=()=>{{stop();show(indexFor(day,hour))}};hours.append(button)}});
+}}
 function selectCentered(strip,button){{if(!button)return;stop();if(strip===days)show(indexFor(button.dataset.day,data.frames[currentIndex].hour),strip);
   else show(indexFor(data.frames[currentIndex].day,Number(button.dataset.hour)),strip);
 }}
@@ -341,6 +356,7 @@ let timer=null;function stop(){{clearInterval(timer);timer=null;if(mapPlay)mapPl
 document.querySelector('#close-details').onclick=()=>{{details.hidden=true;selectedTownId=null;selectedDetailDate=null;document.querySelector('main').classList.remove('details-open');setTimeout(()=>map.invalidateSize(),0)}};
 document.addEventListener('keydown',event=>{{if(event.key==='ArrowLeft'){{stop();show(currentIndex-1)}}if(event.key==='ArrowRight'){{stop();show(currentIndex+1)}}if(event.key===' '){{event.preventDefault();toggle()}}}});
 map.on('zoomend moveend resize',layoutLabels);map.whenReady(()=>show(0));
+if('serviceWorker' in navigator)navigator.serviceWorker.register('{escape(config.github_pages_base_url)}/sw.js');
 </script></body></html>"""
 
 
