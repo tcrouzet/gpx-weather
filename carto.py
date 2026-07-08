@@ -372,9 +372,11 @@ function show(i,draggedStrip=null){{if(!data.frames.length)return;currentIndex=M
   if(selectedTownId)showDetails(selectedTownId);requestAnimationFrame(layoutLabels);
 }}
 function centerChoice(strip,button){{if(button)strip.scrollTo({{left:button.offsetLeft-(strip.clientWidth-button.offsetWidth)/2,behavior:'smooth'}})}}
-function indexFor(day,hour){{const exact=data.frames.findIndex(frame=>frame.day===day&&frame.hour===hour);if(exact>=0)return exact;
-  const candidates=data.frames.map((frame,index)=>({{frame,index}})).filter(item=>item.frame.day===day);
-  return candidates.sort((a,b)=>Math.abs(a.frame.hour-hour)-Math.abs(b.frame.hour-hour))[0]?.index??currentIndex;
+function indexFor(day,hour){{const candidates=data.frames.map((frame,index)=>({{frame,index}})).filter(item=>item.frame.day===day);
+  if(!candidates.length)return currentIndex;
+  const exact=candidates.find(item=>item.frame.hour===hour);if(exact)return exact.index;
+  const before=candidates.filter(item=>item.frame.hour<=hour).at(-1);
+  return (before??candidates.at(-1)).index;
 }}
 const seenDays=new Set();data.frames.forEach(frame=>{{if(seenDays.has(frame.day))return;seenDays.add(frame.day);const button=document.createElement('button');
   button.dataset.day=frame.day;button.textContent=frame.day_label;button.onclick=()=>{{stop();show(indexFor(frame.day,data.frames[currentIndex].hour))}};days.append(button);
