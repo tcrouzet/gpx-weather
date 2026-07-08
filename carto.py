@@ -61,17 +61,47 @@ def load_data():
     return forecasts
 
 
+def active_window_start():
+    """Début de la fenêtre horaire actuellement affichable.
+
+    À 15h, la prévision active est 14h, pas 16h. On prend donc la dernière
+    heure d'échantillonnage inférieure ou égale à l'heure courante.
+    """
+    now = pd.Timestamp(datetime.now(ZoneInfo("Europe/Paris"))).floor("h")
+    sample_hours = sorted({int(hour) % 24 for hour in config.sample_hours})
+    active_hour = max((hour for hour in sample_hours if hour <= now.hour), default=sample_hours[-1])
+    active_day = now.normalize()
+    if active_hour > now.hour:
+        active_day -= pd.Timedelta(days=1)
+    return active_day + pd.Timedelta(hours=active_hour)
+
+
+def complete_forecast_times(forecasts):
+    point_count = forecasts["point_index"].nunique()
+    required = ["temperature", "weather_code", "wind_speed", "wind_gusts", "precipitation"]
+    complete = []
+    for ts, rows in forecasts.groupby("time", sort=True):
+        if len(rows) != point_count:
+            continue
+        if any(pd.to_numeric(rows[column], errors="coerce").isna().any() for column in required if column in rows):
+            continue
+        complete.append(pd.Timestamp(ts))
+    return set(complete)
+
+
 def selected_times(forecasts):
-    hours = set(config.sample_hours)
-    current_hour = pd.Timestamp(datetime.now(ZoneInfo("Europe/Paris"))).floor("h")
+    hours = {int(hour) % 24 for hour in config.sample_hours}
+    current_window = active_window_start()
+    complete_times = complete_forecast_times(forecasts)
     return [pd.Timestamp(t) for t in sorted(forecasts["time"].unique())
-            if pd.Timestamp(t) >= current_hour
+            if pd.Timestamp(t) >= current_window
+            and pd.Timestamp(t) in complete_times
             and pd.Timestamp(t).hour in hours and pd.Timestamp(t).minute == 0]
 
 
 def make_payload(forecasts, route):
-    current_hour = pd.Timestamp(datetime.now(ZoneInfo("Europe/Paris"))).floor("h")
-    forecasts = forecasts[forecasts["time"] >= current_hour].copy()
+    current_window = active_window_start()
+    forecasts = forecasts[forecasts["time"] >= current_window].copy()
     towns_frame = (forecasts.sort_values("time").drop_duplicates("point_index")
                    .sort_values("point_index"))
     day_abbreviations = ["LU", "MA", "ME", "JE", "VE", "SA", "DI"]
@@ -229,8 +259,14 @@ display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
 <div class="controls"><div class="timeline"><div class="strip-wrap"><div id="days" class="strip days"></div></div><div class="strip-wrap"><div id="hours" class="strip hours"></div></div></div></div>
 <aside id="details" class="details" hidden><div class="details-shell"><div class="sheet-head"><button id="close-details" class="close-details">Fermer</button><h2 id="details-title"></h2><span></span></div><div id="daily-strip" class="daily-strip"></div><div id="details-content"></div></div></aside>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
-const data={data},currentHour=new Date();currentHour.setMinutes(0,0,0);
-data.frames=data.frames.filter(frame=>new Date(frame.iso)>=currentHour);
+const data={data},townIds=data.towns.map(town=>town.id);
+function frameComplete(frame){{return townIds.every(id=>{{const value=frame.values[id];
+  return value&&Number.isFinite(value.temperature)&&value.weather&&value.weather!=='unknown';
+}})}}
+data.frames=data.frames.filter(frameComplete);
+const now=new Date();now.setMinutes(0,0,0);
+const activeIndex=data.frames.reduce((best,frame,index)=>new Date(frame.iso)<=now?index:best,-1);
+if(activeIndex>0)data.frames=data.frames.slice(activeIndex);
 const icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}},
 weatherNames={{clear:'Ciel dégagé',partly_cloudy:'Éclaircies',cloudy:'Nuageux',fog:'Brouillard',drizzle:'Bruine',rain:'Pluie',snow:'Neige',storm:'Orage',unknown:'Indéterminé'}};
 const menuButton=document.querySelector('#menu-button'),routeMenu=document.querySelector('#route-menu');

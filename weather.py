@@ -28,6 +28,8 @@ Usage :
 import os
 import sys
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -96,6 +98,17 @@ def build_http_session():
     )
 
 
+def active_window_start_utc():
+    """Début UTC de la fenêtre météo active côté affichage."""
+    now = pd.Timestamp(datetime.now(ZoneInfo("Europe/Paris"))).floor("h")
+    sample_hours = sorted({int(hour) % 24 for hour in config.sample_hours})
+    active_hour = max((hour for hour in sample_hours if hour <= now.hour), default=sample_hours[-1])
+    active_day = now.normalize()
+    if active_hour > now.hour:
+        active_day -= pd.Timedelta(days=1)
+    return (active_day + pd.Timedelta(hours=active_hour)).tz_convert("UTC")
+
+
 def get_forecast_for_point(client, lat, lon, forecast_days=16):
     """Recupere la prevision horaire pour un point donne, aussi loin que
     possible dans le temps (jusqu'a forecast_days, 16 jours max chez
@@ -147,11 +160,9 @@ def get_forecast_for_point(client, lat, lon, forecast_days=16):
     df["lon"] = lon
 
     # Open-Meteo renvoie l'historique horaire depuis minuit (heure locale) du
-    # jour courant, ce qui inclut des heures deja passees. On ne garde que
-    # les echeances a venir (>= maintenant), sinon carto.py afficherait des
-    # dates/heures deja ecoulees.
-    now_utc = pd.Timestamp.now(tz="UTC")
-    df = df[df["time"] >= now_utc].reset_index(drop=True)
+    # jour courant. On garde la fenêtre d'échantillonnage active (ex. 14h
+    # entre 14h et 16h), sinon le slider démarre sur la fenêtre suivante.
+    df = df[df["time"] >= active_window_start_utc()].reset_index(drop=True)
 
     return df
 
@@ -196,9 +207,15 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     wind_direction = member_matrix("wind_direction_10m")
 
     # L'API peut completer la fin de la plage demandee avec des lignes dont
-    # tous les membres sont absents. Elles ne constituent pas une prevision
-    # et doivent etre retirees avant les aggregations et le calcul du mode.
-    valid = np.isfinite(temperature).any(axis=1)
+    # certaines variables sont absentes. Elles ne constituent pas une
+    # prévision affichable : sinon la dernière fenêtre du slider produit des
+    # pictogrammes inconnus.
+    valid = (
+        np.isfinite(temperature).any(axis=1)
+        & np.isfinite(weather_codes).any(axis=1)
+        & np.isfinite(wind).any(axis=1)
+        & np.isfinite(gusts).any(axis=1)
+    )
     result = result.loc[valid].reset_index(drop=True)
     temperature = temperature[valid]
     precipitation = precipitation[valid]
