@@ -22,4 +22,5 @@ une navigation par jour et une fiche météo détaillée au clic. La trace GPX e
 intégration afin d'alléger le HTML sans modifier le fichier source.
 
 cd /Users/thierrycrouzet/Documents/python/gpxWeather/
-codex
+codex resume 019f334f-df36-7730-ab8a-a2613c08203b
+/permissions
