@@ -215,3 +215,7 @@ prévisions nécessitent une connexion réseau.
   `github_pages_base_url`, `start_url`, `scope` et `ROOT`.
 - **GitHub Pages n'est pas publié** : vérifier que la source Pages est bien
   **GitHub Actions** et consulter les logs du workflow dans l'onglet Actions.
+
+## Licence
+
+Ce projet est distribué sous licence Apache 2.0. Voir [LICENSE](LICENSE).
