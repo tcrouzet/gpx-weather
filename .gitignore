@@ -5,4 +5,5 @@ __pycache__/
 .cache_meteo*
 _output/
 screenshot/
+doc.md
 *.tmp
