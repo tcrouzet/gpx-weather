@@ -382,12 +382,13 @@ const seenDays=new Set();data.frames.forEach(frame=>{{if(seenDays.has(frame.day)
   button.dataset.day=frame.day;button.textContent=frame.day_label;button.onclick=()=>{{stop();show(indexFor(frame.day,data.frames[currentIndex].hour))}};days.append(button);
 }});
 function renderHours(day){{const available=[...new Set(data.frames.filter(frame=>frame.day===day).map(frame=>frame.hour))].sort((a,b)=>a-b);
-  const displayed=[...hours.querySelectorAll('button')].map(button=>Number(button.dataset.hour));if(displayed.join(',')===available.join(','))return;
-  hours.replaceChildren();available.forEach(hour=>{{const button=document.createElement('button');button.dataset.hour=hour;
-    button.textContent=`${{String(hour).padStart(2,'0')}}:00`;button.onclick=()=>{{stop();show(indexFor(day,hour))}};hours.append(button)}});
+  const displayed=[...hours.querySelectorAll('button')].map(button=>Number(button.dataset.hour));
+  if(hours.dataset.day===day&&displayed.join(',')===available.join(','))return;
+  hours.dataset.day=day;hours.replaceChildren();available.forEach(hour=>{{const button=document.createElement('button');button.dataset.hour=hour;
+    button.textContent=`${{String(hour).padStart(2,'0')}}:00`;button.onclick=()=>{{stop();show(indexFor(hours.dataset.day,hour))}};hours.append(button)}});
 }}
 function selectCentered(strip,button){{if(!button)return;stop();if(strip===days)show(indexFor(button.dataset.day,data.frames[currentIndex].hour),strip);
-  else show(indexFor(data.frames[currentIndex].day,Number(button.dataset.hour)),strip);
+  else show(indexFor(hours.dataset.day,Number(button.dataset.hour)),strip);
 }}
 function enableSlideSelection(strip){{let pending,animationFrame,userScrolling=false;const arm=()=>{{userScrolling=true}};strip.addEventListener('pointerdown',arm);
   strip.addEventListener('touchstart',arm,{{passive:true}});strip.addEventListener('wheel',arm,{{passive:true}});
