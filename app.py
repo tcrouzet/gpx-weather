@@ -78,12 +78,13 @@ def write_routes_index(routes):
 .title{{position:relative;background:#18295c;color:#fff;padding:7px 48px;text-align:center;font-size:clamp(14px,1.7vw,22px);font-weight:800;line-height:1.1}}
 .menu-button{{position:absolute;left:4px;top:0;bottom:0;margin:auto;width:42px;height:32px;padding:0;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;appearance:none;-webkit-appearance:none}}
 .menu-button::before{{content:"";position:absolute;left:50%;top:50%;width:25px;height:3px;transform:translate(-50%,-50%);border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
+.share-button{{position:absolute;right:5px;top:0;bottom:0;margin:auto;width:40px;height:32px;padding:4px;border:0;background:transparent;color:#fff;cursor:pointer}}.share-button svg{{display:block;width:24px;height:24px;margin:auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}}
 .route-menu{{position:absolute;z-index:10;left:8px;top:38px;min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005}}
 .route-menu[hidden]{{display:none}}.route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}.route-menu a:hover{{background:#edf1fa}}
 .content{{width:min(720px,100%);margin:auto;padding:24px 18px 40px}}h1{{font-size:25px;margin:0 0 16px}}h2{{font-size:19px;margin:28px 0 10px}}
 .routes{{display:grid;gap:8px}}.routes a{{display:block;padding:13px 15px;background:#fff;border-radius:10px;color:#315bb5;font-weight:750;text-decoration:none;box-shadow:0 1px 4px #17234d18}}
 li{{margin:.55rem 0;line-height:1.4}}</style></head><body>
-<header class="title"><button id="menu-button" class="menu-button" aria-label="Ouvrir le menu">☰</button>GPX Weather</header>
+<header class="title"><button id="menu-button" class="menu-button" aria-label="Ouvrir le menu">☰</button>GPX Weather<button id="share-button" class="share-button" aria-label="Partager cette page" title="Partager"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></svg></button></header>
 <nav id="route-menu" class="route-menu" hidden>{menu}</nav>
 <main class="content"><h1>Prévisions disponibles</h1><div class="routes">{route_links}</div>
 <h2>Aide</h2><ul><li>Choisissez un parcours dans la liste ou dans le menu.</li>
@@ -95,6 +96,7 @@ li{{margin:.55rem 0;line-height:1.4}}</style></head><body>
 button.onclick=event=>{{event.stopPropagation();menu.hidden=!menu.hidden}};
 document.addEventListener('click',event=>{{if(!menu.contains(event.target)&&event.target!==button)menu.hidden=true}});
 document.addEventListener('keydown',event=>{{if(event.key==='Escape')menu.hidden=true}});
+const shareButton=document.querySelector('#share-button');shareButton.onclick=async()=>{{const shareData={{title:document.title,url:location.href}};try{{if(navigator.share)await navigator.share(shareData);else{{await navigator.clipboard.writeText(location.href);shareButton.title='Lien copié';setTimeout(()=>shareButton.title='Partager',1600)}}}}catch(error){{if(error.name!=='AbortError')console.warn('Partage impossible',error)}}}};
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script></body></html>'''
     with open(os.path.join(config.output_root, "index.html"), "w", encoding="utf-8") as handle:
         handle.write(html)
