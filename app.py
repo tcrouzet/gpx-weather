@@ -11,9 +11,10 @@ import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from html import escape
 
 import config
+from gpx_export import export_simplified_gpx
+from navigation import NAVIGATION_CSS, NAVIGATION_SCRIPT, render_navigation, render_route_links
 
 
 def run_step(module_name, label):
@@ -36,6 +37,14 @@ def weather_cache_is_fresh(max_age_hours):
     try:
         with open(config.weather_cache_meta_path, "r", encoding="utf-8") as handle:
             fetched = datetime.fromisoformat(json.load(handle)["fetched_at_utc"])
+        # Une modification de la liste des villes change les coordonnées des
+        # prévisions : l'ancien cache météo ne doit alors jamais être réutilisé.
+        if os.path.exists(config.towns_csv_path):
+            towns_modified = datetime.fromtimestamp(
+                os.path.getmtime(config.towns_csv_path), tz=timezone.utc
+            )
+            if towns_modified > fetched:
+                return False
         return (datetime.now(timezone.utc) - fetched).total_seconds() < max_age_hours * 3600
     except (OSError, KeyError, ValueError, json.JSONDecodeError):
         return cache_is_fresh(config.csv_path, max_age_hours)
@@ -65,38 +74,25 @@ def write_routes_index(routes):
     os.makedirs(config.output_root, exist_ok=True)
     for asset in ("manifest.webmanifest", "sw.js", "icon-192.png", "icon-512.png", "apple-touch-icon.png"):
         shutil.copy2(os.path.join(config.BASE_DIR, "webapp", asset), config.output_root)
-    route_links = "".join(
-        f'<a href="{escape(slug)}/">{escape(title)}</a>'
-        for slug, title in routes
-    )
-    menu = f'<a href="./">Accueil et aide</a>{route_links}'
+    route_links = render_route_links(routes)
+    navigation_html = render_navigation("GPX Weather", routes, "./")
     html = f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GPX Weather</title>
 <meta name="theme-color" content="#18295c"><meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>*{{box-sizing:border-box}}body{{margin:0;background:#f4f6fa;color:#17234d;font-family:system-ui,sans-serif}}
-.title{{position:relative;background:#18295c;color:#fff;padding:7px 48px;text-align:center;font-size:clamp(14px,1.7vw,22px);font-weight:800;line-height:1.1}}
-.menu-button{{position:absolute;left:4px;top:0;bottom:0;margin:auto;width:42px;height:32px;padding:0;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;appearance:none;-webkit-appearance:none}}
-.menu-button::before{{content:"";position:absolute;left:50%;top:50%;width:25px;height:3px;transform:translate(-50%,-50%);border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
-.share-button{{position:absolute;right:5px;top:0;bottom:0;margin:auto;width:40px;height:32px;padding:4px;border:0;background:transparent;color:#fff;cursor:pointer}}.share-button svg{{display:block;width:24px;height:24px;margin:auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}}
-.route-menu{{position:absolute;z-index:10;left:8px;top:38px;min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005}}
-.route-menu[hidden]{{display:none}}.route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}.route-menu a:hover{{background:#edf1fa}}
+{NAVIGATION_CSS}
 .content{{width:min(720px,100%);margin:auto;padding:24px 18px 40px}}h1{{font-size:25px;margin:0 0 16px}}h2{{font-size:19px;margin:28px 0 10px}}
 .routes{{display:grid;gap:8px}}.routes a{{display:block;padding:13px 15px;background:#fff;border-radius:10px;color:#315bb5;font-weight:750;text-decoration:none;box-shadow:0 1px 4px #17234d18}}
 li{{margin:.55rem 0;line-height:1.4}}</style></head><body>
-<header class="title"><button id="menu-button" class="menu-button" aria-label="Ouvrir le menu">☰</button>GPX Weather<button id="share-button" class="share-button" aria-label="Partager cette page" title="Partager"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></svg></button></header>
-<nav id="route-menu" class="route-menu" hidden>{menu}</nav>
+{navigation_html}
 <main class="content"><h1>Prévisions disponibles</h1><div class="routes">{route_links}</div>
 <h2>Aide</h2><ul><li>Choisissez un parcours dans la liste ou dans le menu.</li>
 <li>Faites glisser les frises du jour et de l’heure pour changer la prévision affichée.</li>
 <li>Touchez une icône météo sur la carte pour ouvrir les prévisions détaillées de ce point.</li>
 <li>Le bouton de lecture sur la carte fait défiler automatiquement les prévisions.</li>
 <li>Le sélecteur en haut à droite de la carte permet de changer le fond de carte.</li></ul></main>
-<script>const button=document.querySelector('#menu-button'),menu=document.querySelector('#route-menu');
-button.onclick=event=>{{event.stopPropagation();menu.hidden=!menu.hidden}};
-document.addEventListener('click',event=>{{if(!menu.contains(event.target)&&event.target!==button)menu.hidden=true}});
-document.addEventListener('keydown',event=>{{if(event.key==='Escape')menu.hidden=true}});
-const shareButton=document.querySelector('#share-button');shareButton.onclick=async()=>{{const shareData={{title:document.title,url:location.href}};try{{if(navigator.share)await navigator.share(shareData);else{{await navigator.clipboard.writeText(location.href);shareButton.title='Lien copié';setTimeout(()=>shareButton.title='Partager',1600)}}}}catch(error){{if(error.name!=='AbortError')console.warn('Partage impossible',error)}}}};
+<script>{NAVIGATION_SCRIPT}
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script></body></html>'''
     with open(os.path.join(config.output_root, "index.html"), "w", encoding="utf-8") as handle:
         handle.write(html)
@@ -105,6 +101,12 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</scri
 def process_route(gpx_path):
     config.configure_route(gpx_path)
     print(f"\n##### Parcours : {config.project} ({config.route_slug}) #####")
+
+    export_simplified_gpx(
+        config.gpx_file, config.production_gpx_path,
+        interval_km=getattr(config, "production_gpx_interval_km", 1),
+        name=config.project,
+    )
 
     if not os.path.exists(config.towns_csv_path):
         run_step("town", "Étape 1 : town")
@@ -127,12 +129,19 @@ def process_route(gpx_path):
         )
 
     run_step("carto", "Étape 4 : carto Leaflet")
+    shutil.copy2(
+        config.production_gpx_path,
+        os.path.join(config.outdir, "trace.gpx"),
+    )
 
 
 def main():
     gpx_files = config.list_gpx_files()
     if not gpx_files:
-        raise FileNotFoundError(f"Aucun fichier .gpx dans {config.gpx_dir}")
+        raise FileNotFoundError(
+            f"Aucun fichier .gpx dans {config.source_gpx_dir} "
+            f"ni dans {config.public_gpx_dir}"
+        )
     routes = []
     for gpx_path in gpx_files:
         process_route(gpx_path)

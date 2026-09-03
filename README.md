@@ -1,7 +1,7 @@
 # GPX Weather
 
 GPX Weather génère des cartes météo interactives pour tous les parcours GPX
-placés dans `gpx/`. Les pages utilisent Open-Meteo, les ensembles ECMWF,
+placés localement dans `_gpx/`. Les pages utilisent Open-Meteo, les ensembles ECMWF,
 Leaflet et OpenStreetMap. Elles peuvent être installées comme webapp mobile.
 
 Le workflow `.github/workflows/pages.yml` reconstruit et republie le site sur
@@ -50,18 +50,24 @@ caches météo et les pages produites ; il est ignoré par Git.
 
 ## Ajouter un parcours
 
-1. Copier le fichier dans `gpx/`, par exemple `gpx/mon-parcours.gpx`.
+1. Copier le GPX original dans `_gpx/`, par exemple
+   `_gpx/mon-parcours.gpx`. Ce dossier reste strictement local et est ignoré
+   par Git.
 2. Lancer une génération locale :
 
    ```bash
    GITHUB_ACTIONS=true python app.py
    ```
 
-3. Le programme crée `gpx/mon-parcours.villes.csv`. Ce fichier doit être
-   versionné avec le GPX : les villes sont stables et ne doivent pas être
-   recalculées par GitHub Actions à chaque cron.
+3. Le programme crée dans `webapp/gpx/` un GPX public simplifié à environ un
+   point par kilomètre, son profil d'effort et le CSV des villes. Ces fichiers
+   doivent être versionnés : GitHub Actions les utilise lorsque les originaux
+   privés de `_gpx/` sont absents.
 4. Vérifier la carte locale à l'adresse
    `http://localhost:8000/mon-parcours/`.
+
+La version allégée téléchargeable est publiée avec la page à l’adresse
+`https://MON_COMPTE.github.io/MON_DEPOT/mon-parcours/trace.gpx`.
 
 Le nom du fichier détermine l'URL. Les espaces et accents sont automatiquement
 convertis en slug. Par exemple `Gravel Across Switzerland.gpx` produit
@@ -132,18 +138,19 @@ source venv/bin/activate
 pip install -r requirements-pages.txt
 ```
 
-Remplacer les exemples présents dans `gpx/` par ses propres GPX si nécessaire,
+Placer ses GPX originaux dans `_gpx/`,
 puis effectuer une première génération sans publication :
 
 ```bash
 GITHUB_ACTIONS=true python app.py
 ```
 
-Ajouter au dépôt les GPX, les CSV de villes et les changements de
-configuration. Ne pas ajouter `_output/` :
+Ajouter au dépôt les GPX publics, les CSV de villes et les changements de
+configuration. Ne pas ajouter les dossiers commençant par `_`, notamment
+`_gpx/` et `_output/` :
 
 ```bash
-git add config.py webapp/ gpx/
+git add config.py webapp/
 git commit -m "Configurer mes parcours météo"
 git push -u origin main
 ```
@@ -183,7 +190,7 @@ python app.py
 ```
 
 génère les cartes localement, puis lance le workflow GitHub avec `gh`. Cela ne
-fait pas de commit et n'envoie pas les caches de `_output/`. Le code et les GPX
+fait pas de commit et n'envoie pas les caches de `_output/`. Le code et les GPX publics
 doivent déjà avoir été poussés sur GitHub.
 
 Pour lancer uniquement la publication distante :
@@ -206,9 +213,9 @@ prévisions nécessitent une connexion réseau.
 ## Dépannage
 
 - **Aucun GPX trouvé** : vérifier qu'au moins un fichier `.gpx` est présent
-  dans `gpx/`.
+  dans `_gpx/` pour une génération locale, ou dans `webapp/gpx/` sur GitHub
 - **Le workflow recalcule les villes** : générer puis versionner le fichier
-  `gpx/<slug>.villes.csv`.
+  `webapp/gpx/<slug>.villes.csv`.
 - **Erreur de publication locale** : vérifier `gh auth status` et la valeur de
   `github_repository` dans `config.py`.
 - **Webapp ou liens vers un mauvais dépôt** : vérifier

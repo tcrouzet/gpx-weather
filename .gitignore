@@ -1,9 +1,10 @@
 .DS_Store
 venv/
-__pycache__/
 *.pyc
 .cache_meteo*
-_output/
 screenshot/
 doc.md
 *.tmp
+
+# Données de travail et sources privées : tout nom commençant par "_".
+_*

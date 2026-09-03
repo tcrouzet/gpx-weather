@@ -1,0 +1,46 @@
+name,lat,lon,population,distance_km,role
+Melun,48.5281,2.65428,,0.0,depart
+Champagne-sur-Seine,48.3948577,2.8028617,6356.0,24.5,planning
+Ormesson,48.2445017,2.6526868,241.0,50.0,planning
+Cepoy,48.0497044,2.7429032,2373.0,74.3,planning
+Montargis,47.9978628,2.7310072,15061.0,82.7,etape
+Montcresson,47.9075337,2.8049609,1252.0,101.8,meteo
+Feins-en-Gâtinais,47.7460101,2.8403651,32.0,126.7,planning
+Châtillon-sur-Loire,47.5904231,2.7530968,3126.0,149.8,planning
+Sainte-Gemme-en-Sancerrois,47.3946006,2.8162367,406.0,174.6,planning
+Saint-Andelain,47.3089002,2.9608572,601.0,200.0,meteo
+Champvoux,47.1559273,3.0817455,287.0,223.0,planning
+Marzy,46.9804476,3.0931689,3675.0,250.4,planning
+Nevers,46.9876601,3.1577203,32830.0,250.5,etape
+Béard,46.8624,3.32686,162.0,274.9,planning
+Tresnay,46.6965509,3.186931,134.0,298.2,meteo
+Bressolles,46.5318263,3.313561,1139.0,325.4,planning
+Contigny,46.3523,3.30384,577.0,351.3,planning
+Saint-Pourçain-sur-Sioule,46.3074423,3.2899107,4997.0,360.0,etape
+Deneuille-lès-Chantelle,46.2465388,3.1541406,90.0,375.4,planning
+Marcillat,46.0797568,3.0366503,325.0,399.6,meteo
+Charbonnières-les-Varennes,45.9077382,2.9987951,1874.0,424.6,planning
+Laschamps,45.7408087,2.9667131,0.0,449.4,planning
+Clermont-Ferrand,45.7774551,3.0819427,147327.0,461.0,etape
+Lempdes,45.769032,3.1979033,8663.0,474.9,planning
+Authezat,45.6322,3.1853,671.0,500.5,meteo
+Solignat,45.5156368,3.1732776,516.0,525.8,planning
+Saint-Gervazy,45.4146342,3.2164953,337.0,550.3,planning
+Auriac-l'Église,45.2646177,3.126795,144.0,577.0,planning
+Sainte-Anastasie,45.1726719,2.9692326,140.0,599.0,meteo
+Super Lioran,45.083144,2.7491802,0.0,625.8,planning
+Coltines,45.093511,2.9880118,431.0,648.8,planning
+Saint-Flour,45.0334949,3.0931009,6423.0,660.3,etape
+Anglards-de-Saint-Flour,44.9808134,3.1535333,386.0,676.8,planning
+Le Malzieu-Ville,44.8550632,3.3305805,741.0,700.1,meteo
+Saint-Denis-en-Margeride,44.7355703,3.4712302,147.0,726.9,planning
+Arzenc-de-Randon,44.6618,3.63237,187.0,752.5,planning
+Chastel-Nouvel,44.5576755,3.5010855,926.0,772.4,planning
+Mende,44.5180226,3.4991057,12316.0,779.5,etape
+Saint-Étienne-du-Valdonnez,44.4557857,3.5620097,638.0,791.4,meteo
+Florac Trois Rivières,44.3238991,3.5942386,2096.0,821.8,planning
+Molezon,44.2079,3.68186,97.0,853.8,planning
+Saumane,44.1198446,3.7611164,289.0,875.6,planning
+Saint-Sébastien-d'Aigrefeuille,44.1065,3.99374,508.0,899.5,meteo
+Moulézan,43.9302,4.12475,648.0,925.0,planning
+Nîmes,43.84317,4.34956,,953.3,arrivee

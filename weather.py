@@ -67,7 +67,9 @@ def load_towns(towns_csv_path):
     if missing:
         sys.exit(f"Colonnes manquantes dans {towns_csv_path} : {missing}")
 
-    df = df.sort_values("distance_km").reset_index(drop=True)
+    # Les lignes "planning" servent uniquement à nommer précisément les
+    # lieux de passage. Leur météo est celle du point principal le plus proche.
+    df = df[df["role"] != "planning"].sort_values("distance_km").reset_index(drop=True)
     return df.to_dict("records")
 
 

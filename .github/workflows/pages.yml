@@ -44,6 +44,7 @@ jobs:
             slug="$(basename "$(dirname "$page")")"
             mkdir -p "_site/$slug"
             cp "$page" "_site/$slug/index.html"
+            cp "webapp/gpx/$slug.gpx" "_site/$slug/trace.gpx"
           done
       - name: Installer Chrome pour la vignette
         id: chrome

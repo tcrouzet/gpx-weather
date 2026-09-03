@@ -13,6 +13,7 @@ import pandas as pd
 from shapely.geometry import LineString
 
 import config
+from navigation import NAVIGATION_CSS, NAVIGATION_SCRIPT, render_navigation
 
 
 FR_JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -43,16 +44,43 @@ def wind_direction_label(value):
     return labels[int((float(value) + 22.5) // 45) % 8]
 
 
-def load_track(path):
+def load_track(path, simplify=True):
     with open(path, "r", encoding="utf-8") as handle:
         gpx = gpxpy.parse(handle)
     points = [p for track in gpx.tracks for segment in track.segments for p in segment.points]
     if not points:
         points = [p for route in gpx.routes for p in route.points]
+    exact_coordinates = [(p.latitude, p.longitude) for p in points]
+    elevations = pd.Series([p.elevation for p in points], dtype="float64")
+    elevations = elevations.interpolate(limit_direction="both").rolling(
+        getattr(config, "elevation_smoothing_points", 5),
+        center=True, min_periods=1
+    ).median()
+    cumulative_distance = 0.0
+    cumulative_effort = 0.0
+    profile = [{"distance": 0.0, "effort": 0.0}]
+    climb_factor = getattr(config, "planning_climb_km_per_100m", 1.0)
+    last_profile_distance = 0.0
+    for index, (a, b) in enumerate(zip(exact_coordinates, exact_coordinates[1:]), 1):
+        segment_distance = 2 * 6371.0088 * math.asin(math.sqrt(
+            math.sin(math.radians(b[0] - a[0]) / 2) ** 2
+            + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0]))
+            * math.sin(math.radians(b[1] - a[1]) / 2) ** 2
+        ))
+        ascent = max(0.0, float(elevations.iloc[index] - elevations.iloc[index - 1]))
+        cumulative_distance += segment_distance
+        cumulative_effort += segment_distance + ascent / 100 * climb_factor
+        if cumulative_distance - last_profile_distance >= 1 or index == len(points) - 1:
+            profile.append({"distance": round(cumulative_distance, 2),
+                            "effort": round(cumulative_effort, 2)})
+            last_profile_distance = cumulative_distance
     coordinates = [(p.longitude, p.latitude) for p in points]
-    tolerance = getattr(config, "gpx_simplify_degrees", .0003)
-    simplified = LineString(coordinates).simplify(tolerance, preserve_topology=False)
-    return [[lat, lon] for lon, lat in simplified.coords]
+    if simplify:
+        tolerance = getattr(config, "gpx_simplify_degrees", .0003)
+        coordinates = LineString(coordinates).simplify(
+            tolerance, preserve_topology=False
+        ).coords
+    return [[lat, lon] for lon, lat in coordinates], cumulative_distance, profile
 
 
 def load_data():
@@ -99,7 +127,7 @@ def selected_times(forecasts):
             and pd.Timestamp(t).hour in hours and pd.Timestamp(t).minute == 0]
 
 
-def make_payload(forecasts, route):
+def make_payload(forecasts, route, route_distance_km, route_profile):
     current_window = active_window_start()
     forecasts = forecasts[forecasts["time"] >= current_window].copy()
     towns_frame = (forecasts.sort_values("time").drop_duplicates("point_index")
@@ -122,6 +150,21 @@ def make_payload(forecasts, route):
             wind_index = wind_values.idxmax() if wind_values.notna().any() else rows.index[0]
             direction = rows.loc[wind_index].get("wind_direction")
             probability = pd.to_numeric(rows.get("precipitation_probability"), errors="coerce")
+            def conditions_at(hour):
+                matches = rows[rows["time"].dt.hour == hour]
+                if matches.empty:
+                    return None
+                value = matches.iloc[0]
+                rain_probability = value.get("precipitation_probability")
+                return {
+                    "temperature": round(float(value["temperature"])),
+                    "weather": weather_category(value.get("weather_code")),
+                    "wind": round(float(value.get("wind_speed", 0))),
+                    "wind_direction": wind_direction_label(value.get("wind_direction")),
+                    "rain_probability": (round(float(rain_probability))
+                                         if pd.notna(rain_probability) else None),
+                    "precipitation": round(float(value.get("precipitation", 0)), 1),
+                }
             daily.append({
                 "date": date.isoformat(),
                 "weekday": day_abbreviations[date.weekday()],
@@ -129,6 +172,10 @@ def make_payload(forecasts, route):
                 "weather": category,
                 "temperature_max": round(float(rows["temperature"].max())),
                 "temperature_min": round(float(rows["temperature"].min())),
+                "noon": conditions_at(12),
+                "evening": conditions_at(20),
+                "hourly": {str(hour): value for hour in range(24)
+                           if (value := conditions_at(hour)) is not None},
                 "wind": round(float(wind_values.max())) if wind_values.notna().any() else 0,
                 "gusts": round(float(pd.to_numeric(rows["wind_gusts"], errors="coerce").max())),
                 "wind_direction": wind_direction_label(direction),
@@ -139,7 +186,9 @@ def make_payload(forecasts, route):
             })
         towns.append({
             "id": str(town_id), "name": town_row["name"],
-            "lat": float(town_row.lat), "lon": float(town_row.lon), "daily": daily,
+            "lat": float(town_row.lat), "lon": float(town_row.lon),
+            "distance_km": float(town_row.distance_km), "role": town_row["role"],
+            "daily": daily,
         })
     frames = []
     for ts in selected_times(forecasts):
@@ -169,7 +218,42 @@ def make_payload(forecasts, route):
             "hour_label": f"{ts.hour}h",
             "values": values,
         })
-    return {"route": route, "towns": towns, "frames": frames}
+    visible_towns = [town for town in towns if town["role"] not in ("planning", "meteo")]
+    places = pd.read_csv(config.towns_csv_path).sort_values("distance_km")
+    planner_towns = []
+    for _, place in places.iterrows():
+        weather_town = min(
+            towns,
+            key=lambda town: 2 * 6371.0088 * math.asin(math.sqrt(
+                math.sin(math.radians(town["lat"] - float(place.lat)) / 2) ** 2
+                + math.cos(math.radians(float(place.lat)))
+                * math.cos(math.radians(town["lat"]))
+                * math.sin(math.radians(town["lon"] - float(place.lon)) / 2) ** 2
+            )),
+        )
+        planner_towns.append({
+            "name": place["name"], "lat": float(place.lat), "lon": float(place.lon),
+            "distance_km": float(place.distance_km), "role": place["role"],
+            "weather_town_id": weather_town["id"],
+        })
+    return {"route": route, "route_distance_km": round(route_distance_km, 1),
+            "route_profile": route_profile,
+            "planning_daily_riding_hours": getattr(config, "planning_daily_riding_hours", 12),
+            "planning_climb_km_per_100m": getattr(config, "planning_climb_km_per_100m", 1),
+            "towns": visible_towns, "weather_towns": towns,
+            "planner_towns": planner_towns, "frames": frames}
+
+
+def render_panel_header(button_id, button_label, title="", title_id=None):
+    """En-tête commun aux panneaux plein écran, indépendant de leur contenu."""
+    id_attribute = f' id="{escape(title_id, quote=True)}"' if title_id else ""
+    return (
+        '<div class="panel-head">'
+        f'<button id="{escape(button_id, quote=True)}" class="panel-back">'
+        f'{escape(button_label)}</button>'
+        f'<h2{id_attribute} class="panel-title">{escape(title)}</h2>'
+        '</div>'
+    )
 
 
 def build_html(payload):
@@ -177,14 +261,16 @@ def build_html(payload):
     title = escape(getattr(config, "project", "Prévisions météo"))
     page_url = escape(config.github_pages_url, quote=True)
     preview_url = escape(f"{config.github_pages_url}preview.png", quote=True)
-    route_links = "".join(
-        f'<a href="{escape(config.github_pages_base_url)}/{escape(config.route_slug_for(path))}/">'
-        f'{escape(config.route_title_for(path))}</a>'
-        for path in config.list_gpx_files()
+    routes = [(config.route_slug_for(path), config.route_title_for(path))
+              for path in config.list_gpx_files()]
+    navigation_html = render_navigation(
+        config.project, routes, "../", "../", settings=True, title_href="./"
     )
-    menu_html = (
-        f'<a href="{escape(config.github_pages_base_url)}/">Accueil et aide</a>'
-        f'{route_links}'
+    planner_header = render_panel_header(
+        "planner-close", "Carte", "Prévisions du voyage"
+    )
+    details_header = render_panel_header(
+        "close-details", "Fermer", title_id="details-title"
     )
     speed = max(100, int(getattr(config, "speed", .5) * 1000))
     return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
@@ -207,16 +293,7 @@ def build_html(payload):
 <style>
 *{{box-sizing:border-box}} html,body{{height:100%;margin:0;overflow:hidden;font-family:system-ui,sans-serif}}
 main{{position:relative;height:100dvh;display:flex;flex-direction:column;background:#171717}} #map{{min-height:0;flex:1}}
-.title{{position:relative;flex:0 0 auto;background:#18295c;color:white;padding:6px 48px;text-align:center;
-font-weight:800;font-size:clamp(14px,1.7vw,22px);line-height:1.1}}
-.menu-button{{position:absolute;left:4px;top:0;bottom:0;margin:auto;width:42px;height:32px;padding:0;border:0;background:transparent;color:#fff;font-size:0;cursor:pointer;appearance:none;-webkit-appearance:none}}
-.menu-button::before{{content:"";position:absolute;left:50%;top:50%;width:25px;height:3px;transform:translate(-50%,-50%);border-radius:2px;background:#fff;box-shadow:0 -8px #fff,0 8px #fff}}
-.share-button{{position:absolute;right:5px;top:0;bottom:0;margin:auto;width:40px;height:32px;padding:4px;border:0;background:transparent;color:#fff;cursor:pointer}}
-.share-button svg{{display:block;width:24px;height:24px;margin:auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}}
-.route-menu{{position:absolute;z-index:2000;left:8px;top:38px;
-min-width:220px;background:#fff;border-radius:10px;padding:6px;box-shadow:0 5px 20px #0005;text-align:left}}
-.route-menu[hidden]{{display:none}} .route-menu a{{display:block;padding:9px 11px;border-radius:7px;color:#17234d;text-decoration:none;font-size:14px;font-weight:650}}
-.route-menu a:hover{{background:#edf1fa}}
+{NAVIGATION_CSS}
 .leaflet-overlay-pane svg{{z-index:450}}
 .meteo-marker{{width:1px!important;height:1px!important;text-align:center;line-height:1;pointer-events:auto}}
 .temperature,.weather{{position:absolute;left:0;top:0}}
@@ -226,24 +303,34 @@ text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}}
 .details{{flex:1;min-height:0;overflow:hidden;background:#fff;color:#17234d;line-height:1.2}}
 .details[hidden]{{display:none}} main.details-open #map,main.details-open .controls{{display:none}}
 .details-shell{{width:min(920px,100%);height:100%;margin:auto;padding:8px 14px;display:flex;flex-direction:column;overflow:hidden}}
-.sheet-head{{position:relative;flex:0 0 32px;display:flex;align-items:center;margin-bottom:4px}}
-.sheet-head h2{{position:absolute;left:50%;width:70%;transform:translateX(-50%);font-size:20px;text-align:center;margin:0;color:#111}}
-.close-details{{position:absolute;z-index:1;left:0;top:50%;transform:translateY(-50%);border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;cursor:pointer}}
-.daily-strip{{flex:0 0 70px;display:flex;gap:0;overflow:hidden;padding:3px 0;border-bottom:1px solid #ddd}}
-.daily-choice{{flex:1 1 0;min-width:0;border:0;background:transparent;border-radius:8px;padding:2px 0;
+.panel-head{{position:relative;width:100%;height:36px;min-height:36px;flex:0 0 36px;margin-bottom:4px}}
+.panel-title{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 72px;margin:0;text-align:center;font-size:20px;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}}
+.panel-back{{position:absolute;z-index:1;left:0;top:50%;transform:translateY(-50%);border:1px solid #ddd;background:#f6f6f8;border-radius:18px;padding:6px 12px;font-size:13px;font-weight:700;color:#17234d;cursor:pointer}}
+.daily-strip{{flex:0 0 70px;display:flex;gap:0;overflow:hidden;padding:3px 0;border-bottom:1px solid #ddd;background:#fff}}
+.daily-choice{{flex:1 1 0;min-width:0;border:0;border-right:3px solid #fff;background:#eef0f4;border-radius:0;padding:2px 0;
 display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-items:center;color:#70768c;cursor:pointer}}
+.daily-choice:last-child{{border-right:0}}
 .daily-choice .daily-icon{{font-size:21px;line-height:1}} .daily-choice .daily-weekday{{font-size:9px;line-height:1}} .daily-choice .daily-number{{font-size:14px;line-height:1;font-weight:800;color:#315bb5}}
 .daily-choice.active{{background:#f6a800;color:#fff}} .daily-choice.active .daily-number{{color:#fff}}
 #details-content{{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}}
-.forecast-chart{{flex:1 1 0;min-height:0;background:#fafafd;border-radius:10px;overflow:hidden}}
+.forecast-chart{{flex:1 1 0;min-height:0;background:#fff;overflow:hidden}}
 .forecast-chart svg{{display:block;width:100%;height:100%}}
 .metric-grid{{flex:0 0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}}
 .metric{{min-height:58px;background:#ececf2;border-radius:9px;padding:7px 9px}} .metric-label{{display:block;font-size:10px;color:#68708c;margin-bottom:3px}}
-.metric-value{{display:block;font-size:15px;font-weight:800;color:#17234d}} .metric.temperature-card{{background:#ff4b4f}} .metric.gust-card{{background:#55c94c}}
-.metric.temperature-card *,.metric.gust-card *{{color:#fff}} .metric.rain-card{{background:#e8edf8}} .metric.wind-card{{background:#e8edf8}}
+.metric-value{{display:block;font-size:15px;font-weight:800;color:#17234d}} .metric.temperature-card{{background:#ff4b4f}} .metric.wind-card{{background:#55c94c}}
+.metric.temperature-card *,.metric.wind-card *{{color:#fff}} .metric.rain-card{{background:#e8edf8}}
+.metric.precipitation-card{{background:#4da3ff}}.metric.precipitation-card *{{color:#fff}}
 .detail-source{{flex:0 0 auto;margin:5px 2px 0;text-align:center;font-size:10px;color:#68708c}} .detail-source a{{color:#315bb5;font-weight:700}}
-@media(max-width:600px){{.details-shell{{padding:7px 7px}}.sheet-head h2{{font-size:18px}}.metric-grid{{grid-template-columns:repeat(2,1fr);gap:5px}}
-.metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}}}
+.trip-planner{{flex:1;min-height:0;overflow-y:auto;background:#fff;color:#17234d;padding:14px}}
+.trip-planner[hidden]{{display:none}} main.planner-open #map,main.planner-open .controls,main.planner-open .details{{display:none}}
+.planner-shell{{width:min(760px,100%);margin:auto}}.planner-shell>.panel-head{{margin-bottom:14px}}
+.planner-form{{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:10px;margin-bottom:14px}}.planner-form label{{font-size:12px;font-weight:750}}
+.planner-form input{{display:block;width:100%;margin-top:4px;border:1px solid #cbd1df;border-radius:8px;background:#fff;padding:9px;font:inherit;color:#17234d}}
+.trip-days{{display:grid;gap:0}}.trip-day{{background:#fff;padding:9px}}.trip-day-head{{display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}}.trip-day-head span{{font-size:11px;color:#68708c}}
+.trip-metrics{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}}.trip-stop{{min-width:0;background:#f1f3f8;border-radius:8px;padding:7px;text-align:center}}.trip-stop strong{{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.trip-stop-value{{display:block;font-size:18px;font-weight:850;margin:3px 0}}.trip-weather-icon{{font-size:22px;vertical-align:middle;margin-right:3px}}.trip-stop small{{display:block;font-size:9px;color:#68708c;line-height:1.25}}
+.trip-unavailable{{color:#8b90a0;font-size:13px}}
+@media(max-width:600px){{.details-shell{{padding:7px 7px}}.panel-title{{font-size:18px}}.metric-grid{{grid-template-columns:repeat(2,1fr);gap:5px}}
+.metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}.trip-planner{{padding:9px 7px}}.planner-form{{grid-template-columns:1.3fr .7fr .8fr;gap:6px}}.planner-form input{{padding:8px 5px}}.trip-day{{padding:7px}}.trip-metrics{{gap:4px}}.trip-stop{{padding:6px 3px}}.trip-stop-value{{font-size:16px}}}}
 @media(max-height:680px){{.daily-strip{{flex-basis:62px}}.daily-choice{{grid-template-rows:24px 12px 18px}}.daily-choice .daily-icon{{font-size:18px}}
 .metric{{min-height:45px}}.detail-source{{margin-top:3px}}}}
 .controls{{height:86px;flex:0 0 86px;background:#18295c;color:#fff;padding:2px 0}}
@@ -257,9 +344,10 @@ background:transparent;color:#fff;font-size:14px;font-weight:650;scroll-snap-ali
 .strip button.active{{color:#fff;font-weight:850}}
 .map-play{{width:56px;height:56px;border:0;border-radius:50%;background:#352d32e8;color:#fff;font-size:27px;
 display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 8px #0005}}
-</style></head><body><main><header class="title"><button id="menu-button" class="menu-button" aria-label="Ouvrir le menu">☰</button>{title}<button id="share-button" class="share-button" aria-label="Partager cette prévision" title="Partager"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"/></svg></button></header><nav id="route-menu" class="route-menu" hidden>{menu_html}</nav><div id="map"></div>
+</style></head><body><main>{navigation_html}<div id="map"></div>
 <div class="controls"><div class="timeline"><div class="strip-wrap"><div id="days" class="strip days"></div></div><div class="strip-wrap"><div id="hours" class="strip hours"></div></div></div></div>
-<aside id="details" class="details" hidden><div class="details-shell"><div class="sheet-head"><button id="close-details" class="close-details">Fermer</button><h2 id="details-title"></h2><span></span></div><div id="daily-strip" class="daily-strip"></div><div id="details-content"></div></div></aside>
+<section id="trip-planner" class="trip-planner" hidden><div class="planner-shell">{planner_header}<div class="planner-form"><label>Date de départ<input id="trip-start" type="date"></label><label>Heure départ<input id="trip-time" type="time" step="900"></label><label>Durée du voyage<input id="trip-duration" type="number" min="1" max="16" inputmode="numeric"></label></div><div id="trip-days" class="trip-days"></div></div></section>
+<aside id="details" class="details" hidden><div class="details-shell">{details_header}<div id="daily-strip" class="daily-strip"></div><div id="details-content"></div></div></aside>
 </main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const data={data},townIds=data.towns.map(town=>town.id);
 function frameComplete(frame){{return townIds.every(id=>{{const value=frame.values[id];
@@ -271,15 +359,27 @@ const activeIndex=data.frames.reduce((best,frame,index)=>new Date(frame.iso)<=no
 if(activeIndex>0)data.frames=data.frames.slice(activeIndex);
 const icons={{clear:'☀️',partly_cloudy:'🌤️',cloudy:'☁️',fog:'🌫️',drizzle:'🌦️',rain:'🌧️',snow:'🌨️',storm:'⛈️',unknown:'❔'}},
 weatherNames={{clear:'Ciel dégagé',partly_cloudy:'Éclaircies',cloudy:'Nuageux',fog:'Brouillard',drizzle:'Bruine',rain:'Pluie',snow:'Neige',storm:'Orage',unknown:'Indéterminé'}};
-const menuButton=document.querySelector('#menu-button'),routeMenu=document.querySelector('#route-menu');
-menuButton.onclick=event=>{{event.stopPropagation();routeMenu.hidden=!routeMenu.hidden}};
-document.addEventListener('click',event=>{{if(!routeMenu.contains(event.target)&&event.target!==menuButton)routeMenu.hidden=true}});
-document.addEventListener('keydown',event=>{{if(event.key==='Escape')routeMenu.hidden=true}});
-const shareButton=document.querySelector('#share-button');
-shareButton.onclick=async()=>{{const shareData={{title:document.title,url:location.href}};
-  try{{if(navigator.share)await navigator.share(shareData);else{{await navigator.clipboard.writeText(location.href);shareButton.title='Lien copié';setTimeout(()=>shareButton.title='Partager',1600)}}}}
-  catch(error){{if(error.name!=='AbortError')console.warn('Partage impossible',error)}}
-}};
+{NAVIGATION_SCRIPT}
+const planner=document.querySelector('#trip-planner'),tripStart=document.querySelector('#trip-start'),tripDuration=document.querySelector('#trip-duration'),tripTime=document.querySelector('#trip-time'),tripDays=document.querySelector('#trip-days');
+const plannerKey='gpx-weather-trip-{escape(config.route_slug)}';
+function localDate(value){{return new Date(`${{value}}T12:00:00`)}}
+function isoDate(date){{const year=date.getFullYear(),month=String(date.getMonth()+1).padStart(2,'0'),day=String(date.getDate()).padStart(2,'0');return `${{year}}-${{month}}-${{day}}`}}
+function distanceAtEffort(target){{const profile=data.route_profile;if(target<=0)return 0;const index=profile.findIndex(point=>point.effort>=target);if(index<0)return data.route_distance_km;const b=profile[index],a=profile[Math.max(0,index-1)],ratio=(target-a.effort)/Math.max(.001,b.effort-a.effort);return a.distance+(b.distance-a.distance)*ratio}}
+function nearestPlannerTown(distance){{return data.planner_towns.reduce((best,town)=>Math.abs(town.distance_km-distance)<Math.abs(best.distance_km-distance)?town:best)}}
+function endpointTown(role){{return data.planner_towns.find(town=>town.role.includes(role))||nearestPlannerTown(role==='depart'?0:data.route_distance_km)}}
+function noonPlannerTown(distance,morningTown,eveningTown,lastDay){{const upper=lastDay?data.route_distance_km:eveningTown.distance_km,distinct=data.planner_towns.filter(town=>town.name!==morningTown.name&&town.name!==eveningTown.name),candidates=distinct.filter(town=>town.distance_km>morningTown.distance_km+1&&town.distance_km<upper-1),pool=candidates.length?candidates:distinct;return pool.length?pool.reduce((best,town)=>Math.abs(town.distance_km-distance)<Math.abs(best.distance_km-distance)?town:best):nearestPlannerTown(distance)}}
+function townForecast(town,date){{const weatherTown=data.weather_towns.find(candidate=>candidate.id===town?.weather_town_id);return weatherTown?.daily.find(row=>row.date===date)}}
+function conditionCard(title,town,conditions){{if(!conditions)return `<div class="trip-stop"><strong>${{title}} · ${{town?.name??'—'}}</strong><span class="trip-unavailable">Indisponible</span></div>`;const rain=conditions.rain_probability===null?'—':`${{conditions.rain_probability}} %`;return `<div class="trip-stop"><strong>${{title}} · ${{town.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[conditions.weather]}}</b>${{conditions.temperature}}°</span><small>Vent ${{conditions.wind}} km/h · ${{conditions.wind_direction}}</small><small>Pluie ${{rain}} · ${{conditions.precipitation}} mm</small></div>`}}
+function renderPlanner(){{const duration=Math.max(1,Math.min(16,Number(tripDuration.value)||1)),start=localDate(tripStart.value),departureParts=(tripTime.value||'08:00').split(':').map(Number),departureHour=departureParts[0]+departureParts[1]/60,totalEffort=data.route_profile.at(-1).effort,dailyEffort=totalEffort/duration,rideHours=data.planning_daily_riding_hours,arrivalClock=departureHour+rideHours,arrivalHour=Math.round(arrivalClock)%24,arrivalDayOffset=Math.floor(Math.round(arrivalClock)/24);localStorage.setItem(plannerKey,JSON.stringify({{start:tripStart.value,duration,time:tripTime.value}}));
+  const nightTowns=Array.from({{length:duration+1}},(_,index)=>index===0?endpointTown('depart'):index===duration?endpointTown('arrivee'):nearestPlannerTown(distanceAtEffort(dailyEffort*index)));
+  tripDays.innerHTML=Array.from({{length:duration}},(_,index)=>{{const date=new Date(start);date.setDate(start.getDate()+index);const dateKey=isoDate(date),eveningDate=new Date(date);eveningDate.setDate(date.getDate()+arrivalDayOffset);const eveningDateKey=isoDate(eveningDate),label=date.toLocaleDateString('fr-FR',{{weekday:'short',day:'numeric',month:'short'}}),startEffort=dailyEffort*index,endEffort=dailyEffort*(index+1),startDistance=distanceAtEffort(startEffort),endDistance=distanceAtEffort(endEffort),noonRatio=Math.max(0,Math.min(1,(12-departureHour)/Math.max(.1,rideHours))),noonDistance=distanceAtEffort(startEffort+dailyEffort*noonRatio),morningTown=nightTowns[index],eveningTown=nightTowns[index+1],noonTown=noonPlannerTown(noonDistance,morningTown,eveningTown,index===duration-1),morningForecast=townForecast(morningTown,dateKey),noonForecast=townForecast(noonTown,dateKey),eveningForecast=townForecast(eveningTown,eveningDateKey),distance=Math.round(endDistance-startDistance),gain=Math.max(0,Math.round((dailyEffort-(endDistance-startDistance))*100/Math.max(.01,data.planning_climb_km_per_100m))),speed=(endDistance-startDistance)/rideHours;
+    const morning=morningForecast?`<div class="trip-stop"><strong>Matin · ${{morningTown.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[morningForecast.weather]}}</b>${{morningForecast.temperature_min}}°</span><small>Température minimale</small></div>`:`<div class="trip-stop"><strong>Matin · ${{morningTown.name}}</strong><span class="trip-unavailable">Indisponible</span></div>`;
+    return `<article class="trip-day"><div class="trip-day-head"><strong>${{label}}</strong><span>${{distance}} km · D+ ${{gain}} m · ${{speed.toFixed(1)}} km/h</span></div><div class="trip-metrics">${{morning}}${{conditionCard('Midi',noonTown,noonForecast?.noon)}}${{conditionCard('Soir',eveningTown,eveningForecast?.hourly?.[String(arrivalHour)])}}</div></article>`}}).join('')}}
+function openPlanner(){{stop();details.hidden=true;selectedTownId=null;document.querySelector('main').classList.remove('details-open');planner.hidden=false;document.querySelector('main').classList.add('planner-open');renderPlanner()}}
+function closePlanner(){{planner.hidden=true;document.querySelector('main').classList.remove('planner-open');setTimeout(()=>map.invalidateSize(),0)}}
+const savedTrip=(()=>{{try{{return JSON.parse(localStorage.getItem(plannerKey))||{{}}}}catch{{return {{}}}}}})(),availableDates=data.towns.flatMap(town=>town.daily.map(row=>row.date)).sort();
+tripStart.min=availableDates[0]||'';tripStart.removeAttribute('max');tripStart.value=savedTrip.start||data.frames[0]?.day||availableDates[0]||isoDate(new Date());tripDuration.value=savedTrip.duration||{int(config.trip_days)};tripTime.value=savedTrip.time||'08:00';
+tripStart.onchange=renderPlanner;tripDuration.oninput=renderPlanner;tripTime.oninput=renderPlanner;document.querySelector('#settings-button').onclick=openPlanner;document.querySelector('#planner-close').onclick=closePlanner;
 const map=L.map('map',{{zoomControl:true}});
 const osmAttribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const osm=L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:osmAttribution}}).addTo(map);
@@ -333,16 +433,19 @@ function layoutLabels(){{
   }}
 }}
 function escapeHtml(text){{const node=document.createElement('div');node.textContent=String(text);return node.innerHTML}}
-function dailyChart(town,selectedIndex){{const rows=town.daily,columnWidth=40,width=rows.length*columnWidth,height=350,tempTop=24,tempBottom=190,windBase=300;
+function dailyChart(town,selectedIndex){{const rows=town.daily,columnWidth=40,width=rows.length*columnWidth,height=350,tempTop=24,tempBottom=190,barBase=300;
   const temperatures=rows.flatMap(row=>[row.temperature_min,row.temperature_max]),tempMin=Math.floor(Math.min(...temperatures)-1),tempMax=Math.ceil(Math.max(...temperatures)+1);
-  const maxWind=Math.max(1,...rows.map(row=>row.wind)),x=index=>columnWidth/2+index*columnWidth;
-  const yTemp=value=>tempTop+(tempMax-value)/(tempMax-tempMin)*(tempBottom-tempTop),barWidth=24;
+  const maxWind=Math.max(1,...rows.map(row=>row.wind)),maxRain=Math.max(1,...rows.map(row=>row.precipitation)),x=index=>columnWidth/2+index*columnWidth;
+  const yTemp=value=>tempTop+(tempMax-value)/(tempMax-tempMin)*(tempBottom-tempTop),columnGap=3,columnBarWidth=columnWidth-columnGap,dataBarWidth=columnBarWidth/2;
   const maxPoints=rows.map((row,index)=>`${{x(index)}},${{yTemp(row.temperature_max)}}`).join(' '),minPoints=rows.map((row,index)=>`${{x(index)}},${{yTemp(row.temperature_min)}}`).join(' ');
-  const columns=rows.map((row,index)=>{{const px=x(index),barHeight=row.wind/maxWind*78,selected=index===selectedIndex;
-    return `<rect x="${{px-barWidth/2}}" y="18" width="${{barWidth}}" height="${{windBase+6}}" rx="3" fill="${{selected?'#c9cdd6':'#eef0f4'}}" opacity="${{selected?.75:.7}}"/>
-    <rect x="${{px-barWidth/2}}" y="${{windBase-barHeight}}" width="${{barWidth}}" height="${{barHeight}}" rx="3" fill="#50c744"/>
-    <text x="${{px}}" y="${{windBase-barHeight-5}}" text-anchor="middle" font-size="10" fill="#389b31">${{row.wind}}</text>
-    <text x="${{px}}" y="${{windBase+16}}" text-anchor="middle" font-size="17" fill="#17234d" transform="rotate(${{row.wind_degrees}} ${{px}} ${{windBase+11}})">↑</text>
+  const columns=rows.map((row,index)=>{{const px=x(index),windHeight=row.wind/maxWind*78,rainHeight=row.precipitation/maxRain*78,selected=index===selectedIndex;
+    const columnLeft=px-columnWidth/2;
+    return `<rect x="${{columnLeft}}" y="18" width="${{columnBarWidth}}" height="${{barBase+6}}" fill="${{selected?'#c9cdd6':'#f4f5f8'}}" opacity="${{selected?.75:.55}}"/>
+    <rect x="${{columnLeft}}" y="${{barBase-windHeight}}" width="${{dataBarWidth}}" height="${{windHeight}}" fill="#50c744"/>
+    <rect x="${{columnLeft+dataBarWidth}}" y="${{barBase-rainHeight}}" width="${{dataBarWidth}}" height="${{rainHeight}}" fill="#4da3ff"/>
+    <text x="${{columnLeft+dataBarWidth/2}}" y="${{barBase-windHeight-5}}" text-anchor="middle" font-size="9" fill="#389b31">${{row.wind}}</text>
+    <text x="${{columnLeft+dataBarWidth*1.5}}" y="${{barBase-rainHeight-5}}" text-anchor="middle" font-size="9" fill="#287cc9">${{row.precipitation}}</text>
+    <text x="${{px}}" y="${{barBase+16}}" text-anchor="middle" font-size="17" fill="#17234d" transform="rotate(${{row.wind_degrees}} ${{px}} ${{barBase+11}})">↑</text>
     <text x="${{px}}" y="${{height-7}}" text-anchor="middle" font-size="10" fill="#70768c">${{row.weekday}} ${{row.day}}</text>`}}).join('');
   const labels=rows.map((row,index)=>`<text x="${{x(index)}}" y="${{yTemp(row.temperature_max)-7}}" text-anchor="middle" font-size="10" fill="#ef4444">${{row.temperature_max}}</text>
   <text x="${{x(index)}}" y="${{yTemp(row.temperature_min)+14}}" text-anchor="middle" font-size="10" fill="#3182ce">${{row.temperature_min}}</text>`).join('');
@@ -360,9 +463,9 @@ function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById
   document.querySelector('#details-content').innerHTML=`${{dailyChart(town,selectedIndex)}}
   <div class="metric-grid"><div class="metric temperature-card"><span class="metric-label">Températures</span><span class="metric-value">${{selected.temperature_min}}° / ${{selected.temperature_max}}°</span></div>
   <div class="metric rain-card"><span class="metric-label">Risque de pluie</span><span class="metric-value">${{rainValue}}</span></div>
-  <div class="metric rain-card"><span class="metric-label">Précipitations</span><span class="metric-value">${{selected.precipitation}} mm</span></div>
+  <div class="metric precipitation-card"><span class="metric-label">Précipitations</span><span class="metric-value">${{selected.precipitation}} mm</span></div>
   <div class="metric"><span class="metric-label">Conditions</span><span class="metric-value">${{icons[selected.weather]}} ${{weatherNames[selected.weather]}}</span></div>
-  <div class="metric wind-card"><span class="metric-label">Vent maximal</span><span class="metric-value">${{selected.wind}} km/h · ${{selected.wind_direction}}</span></div>
+  <div class="metric wind-card"><span class="metric-label">Vent</span><span class="metric-value">${{selected.wind}} km/h · ${{selected.wind_direction}}</span></div>
   <div class="metric gust-card"><span class="metric-label">Rafales</span><span class="metric-value">${{selected.gusts}} km/h</span></div></div>
   <p class="detail-source"><a href="${{sourceUrl}}" target="_blank" rel="noopener">${{source}}</a>${{selected.ensemble?' — incertitude croissante avec l’échéance.':''}}</p>`;
   details.hidden=false;document.querySelector('main').classList.add('details-open');
@@ -418,7 +521,27 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('{escape(config
 
 def main():
     forecasts = load_data()
-    payload = make_payload(forecasts, load_track(config.gpx_file))
+    route, route_distance_km, route_profile = load_track(config.gpx_file)
+    source_is_public = (
+        os.path.abspath(config.gpx_file)
+        == os.path.abspath(config.production_gpx_path)
+    )
+    if source_is_public and os.path.exists(config.production_profile_path):
+        route, _, _ = load_track(config.production_gpx_path, simplify=False)
+        with open(config.production_profile_path, "r", encoding="utf-8") as handle:
+            stored_profile = json.load(handle)
+        route_distance_km = stored_profile["distance_km"]
+        route_profile = stored_profile["profile"]
+    elif not source_is_public:
+        # La carte en ligne affiche exactement le GPX public kilométrique ; le
+        # profil d'effort reste calculé sur l'original pour préserver le D+.
+        route, _, _ = load_track(config.production_gpx_path, simplify=False)
+        with open(config.production_profile_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {"distance_km": route_distance_km, "profile": route_profile},
+                handle, ensure_ascii=False, separators=(",", ":"),
+            )
+    payload = make_payload(forecasts, route, route_distance_km, route_profile)
     if not payload["frames"]: raise ValueError("Aucune échéance à afficher")
     with open(config.html_path, "w", encoding="utf-8") as handle:
         handle.write(build_html(payload))

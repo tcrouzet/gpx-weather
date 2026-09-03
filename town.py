@@ -9,12 +9,10 @@ Identifie, le long d'une trace GPX :
   - la ville d'arrivee
   - les villes-etapes intermediaires
 
-REGLE UNIQUE, appliquee EXACTEMENT de la meme facon a TOUS ces points
-(depart, etapes, arrivee) : on prend la commune la PLUS GRANDE (population)
-a moins de config.endpoint_search_radius_km (10 km par defaut) du point
-considere. Si aucune commune n'est trouvee dans ce rayon, on ne cherche
-PAS plus loin : on passe simplement au point suivant (pas de repli sur une
-grande ville lointaine).
+Pour les extremites, le nom vient de la commune administrative qui contient
+le point GPX (reverse geocoding Nominatim) : aucune grande ville voisine ne
+peut ainsi remplacer la vraie commune de depart ou d'arrivee. Les villes-etapes
+intermediaires sont choisies dans le corridor de la trace.
 
 Les points-etapes intermediaires sont positionnes a intervalle regulier le
 long du trajet :
@@ -36,8 +34,7 @@ impropre a la MESURE de distances.
 Sources de donnees :
   - trace GPX : fichier local (config.gpx_file)
   - villes/population : Overpass API (OpenStreetMap), gratuit, sans cle
-  - noms des villes de depart/arrivee : Nominatim (reverse geocoding),
-    utilise seulement en tout dernier recours (si rien trouve via Overpass)
+  - noms des villes de depart/arrivee : Nominatim (reverse geocoding)
 
 Installation des dependances :
     pip install gpxpy geopy requests pandas numpy
@@ -236,8 +233,11 @@ def track_point_at_km(target_km, track_lats, track_lons, track_cum_km):
 # ---------------------------------------------------------------------------
 
 def get_endpoint_city(lat, lon, geolocator, label=""):
-    """Trouve le nom de la commune la plus proche d'un point via Nominatim.
-    Utilise seulement en tout dernier recours (voir find_nearby_large_city)."""
+    """Retourne la commune administrative contenant exactement le point.
+
+    Le reverse geocoding est prioritaire aux extremites : choisir la plus
+    grande ville dans un rayon peut remonter une autre zone urbaine.
+    """
     try:
         loc = geolocator.reverse(
             (lat, lon), language="fr", exactly_one=True, timeout=10,
@@ -250,11 +250,8 @@ def get_endpoint_city(lat, lon, geolocator, label=""):
         addr = loc.raw.get("address", {})
         name = (
             addr.get("city") or addr.get("town") or addr.get("village")
-            or addr.get("municipality") or addr.get("hamlet")
-            or addr.get("suburb") or addr.get("county") or addr.get("state")
+            or addr.get("municipality")
         )
-        if not name and loc.address:
-            name = loc.address.split(",")[0].strip()
 
         if not name:
             print(f"  (nom introuvable pour {label} : reponse brute = {loc.raw})")
@@ -262,6 +259,18 @@ def get_endpoint_city(lat, lon, geolocator, label=""):
     except Exception as e:
         print(f"  (reverse-geocoding indisponible pour {label} : {e})")
     return None
+
+
+def get_nearest_endpoint_place(lat, lon, towns, radius_km):
+    """Repli local strict lorsque Nominatim est indisponible."""
+    candidates = [
+        (float(haversine_km(lat, lon, town["lat"], town["lon"])), town)
+        for town in towns
+    ]
+    if not candidates:
+        return None
+    distance, town = min(candidates, key=lambda item: item[0])
+    return town["name"] if distance <= radius_km else None
 
 
 # ---------------------------------------------------------------------------
@@ -299,13 +308,13 @@ def build_coarse_bboxes(track_lats, track_lons, track_cum_km, buffer_km, segment
 def fetch_all_towns(track_lats, track_lons, track_cum_km, buffer_km, segment_km=50):
     """UNE SEULE requete Overpass regroupant, en union, les bbox de chaque
     grand segment de la trace (chacune elargie de buffer_km) : recupere
-    TOUTES les communes (place=city ou place=town) le long du trajet, avec
+    TOUTES les communes (place=city, town ou village) le long du trajet, avec
     leur population si renseignee dans OSM. Aucun filtre de population
     ici : le tri par taille se fait plus tard, au moment de choisir les
     etapes ou la ville de depart/arrivee."""
     bboxes = build_coarse_bboxes(track_lats, track_lons, track_cum_km, buffer_km, segment_km)
     clauses = "\n".join(
-        f'  node["place"~"^(city|town)$"]({s:.5f},{w:.5f},{n:.5f},{e:.5f});'
+        f'  node["place"~"^(city|town|village)$"]({s:.5f},{w:.5f},{n:.5f},{e:.5f});'
         for s, w, n, e in bboxes
     )
     query = f"""
@@ -344,23 +353,8 @@ def load_or_fetch_all_towns(track_lats, track_lons, track_cum_km, buffer_km, cac
 
 
 # ---------------------------------------------------------------------------
-# 4. REGLE UNIQUE de selection d'une ville a un point donne
+# 4. Selection des villes-etapes
 # ---------------------------------------------------------------------------
-
-def find_nearby_large_city(lat, lon, towns, radius_km):
-    """Cherche la plus GRANDE commune (par population) a proximite REELLE
-    du point donne (rayon STRICT radius_km, en km), parmi les communes
-    deja recuperees (cache/Overpass). Utilise uniquement pour le fallback
-    ponctuel du depart/de l'arrivee (voir main()) ; les etapes utilisent
-    desormais project_towns_on_track (recherche le long de TOUT le
-    corridor, pas juste au point exact)."""
-    candidates = [
-        t for t in towns
-        if haversine_km(lat, lon, t["lat"], t["lon"]) <= radius_km
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda t: t["population"])
 
 
 def project_towns_on_track(towns, track_lats, track_lons, track_cum_km, radius_km):
@@ -416,43 +410,88 @@ def dedupe_urban_clusters(towns_on_track, cluster_radius_km):
     return kept
 
 
-def assign_stage_towns(targets, towns_on_track, max_deviation_km):
-    """Pour chaque point cible (target_km, role), choisit -- parmi les
-    communes deja projetees sur le trajet (project_towns_on_track) et pas
-    encore utilisees, et dont l'ecart a l'intervalle ideal est
-    <= max_deviation_km -- celle qui est REELLEMENT LA PLUS PROCHE DE LA
-    TRACE (plus petite distance perpendiculaire dist_to_track_km).
+def select_planning_towns(towns_on_track, total_distance_km, interval_km):
+    """Construit un maillage régulier de communes pour les heures de passage.
 
-    C'est le critere PRINCIPAL : une ville a 0.5 km de la trace doit
-    toujours etre preferee a une ville a 8 km de la trace, meme si cette
-    derniere tombe un peu plus pile sur l'intervalle ideal. L'ecart a
-    l'intervalle (dev) ne sert qu'en depart-egalite (deux villes aussi
-    proches l'une que l'autre de la trace) et de filtre grossier
-    (max_deviation_km) pour eviter qu'une etape ne "vole" une ville en
-    realite destinee a l'etape voisine.
-
-    Si rien de convenable n'est trouve dans cette fenetre, l'etape est
-    consideree comme vide (voir main())."""
+    À chaque multiple de ``interval_km``, conserve la commune dont la position
+    le long de la trace est la plus proche. Les villages très voisins ne sont
+    donc pas tous interrogés, mais aucun grand vide artificiel ne subsiste.
+    """
+    selected = []
     used_names = set()
-    assigned = {}
-
-    for target_km, role in targets:
-        best = None
-        best_key = None
-        for t in towns_on_track:
-            if t["name"] in used_names:
-                continue
-            dev = abs(t["track_km"] - target_km)
-            if dev > max_deviation_km:
-                continue
-            key = (t["dist_to_track_km"], dev)
-            if best is None or key < best_key:
-                best, best_key = t, key
-        if best is not None:
+    targets = np.arange(0, total_distance_km + interval_km, interval_km)
+    for target in targets:
+        candidates = [town for town in towns_on_track if town["name"] not in used_names]
+        if not candidates:
+            break
+        best = min(candidates, key=lambda town: (
+            abs(town["track_km"] - target), town["dist_to_track_km"]
+        ))
+        if abs(best["track_km"] - target) <= interval_km:
+            selected.append(best)
             used_names.add(best["name"])
-        assigned[(target_km, role)] = best
+    selected.sort(key=lambda town: town["track_km"])
+    return selected
 
-    return assigned
+
+def assign_stage_towns(targets, towns_on_track, max_deviation_km,
+                       minimum_distance_km=0, fixed_points=(),
+                       max_assignments=None):
+    """Optimise globalement les villes principales de la trace.
+
+    Le score privilégie successivement le nombre de villes compatibles,
+    l'équilibre entre aller et retour, la population, puis la proximité de
+    la trace et de l'intervalle cible. Une grande ville structurante comme
+    Girona ne peut donc pas être évincée par une petite commune équivalente.
+    """
+    candidate_sets = []
+    for target_km, _ in targets:
+        candidates = []
+        for town in towns_on_track:
+            if abs(town["track_km"] - target_km) > max_deviation_km:
+                continue
+            if any(haversine_km(town["lat"], town["lon"], lat, lon)
+                   < minimum_distance_km for lat, lon in fixed_points):
+                continue
+            candidates.append(town)
+        candidate_sets.append(candidates)
+
+    midpoint = (targets[0][0] + targets[-1][0]) / 2 if targets else 0
+    best_score = None
+    best_assignment = [None] * len(targets)
+
+    def search(index, selected, assignment):
+        nonlocal best_score, best_assignment
+        if index == len(targets):
+            early = sum(town["track_km"] < midpoint for town in selected)
+            late = len(selected) - early
+            quality = sum(
+                town["dist_to_track_km"] * 100
+                + abs(town["track_km"] - targets[position][0])
+                for position, town in enumerate(assignment) if town is not None
+            )
+            population = sum(float(town.get("population") or 0) for town in selected)
+            score = (len(selected), min(early, late), -abs(early - late),
+                     population, -quality)
+            if best_score is None or score > best_score:
+                best_score, best_assignment = score, list(assignment)
+            return
+        if best_score is not None and len(selected) + len(targets) - index < best_score[0]:
+            return
+        if max_assignments is None or len(selected) < max_assignments:
+            for town in candidate_sets[index]:
+                if any(
+                    town["name"] == other["name"]
+                    or haversine_km(town["lat"], town["lon"], other["lat"], other["lon"])
+                    < minimum_distance_km
+                    for other in selected
+                ):
+                    continue
+                search(index + 1, selected + [town], assignment + [town])
+        search(index + 1, selected, assignment + [None])
+
+    search(0, [], [])
+    return {target: town for target, town in zip(targets, best_assignment)}
 
 
 # ---------------------------------------------------------------------------
@@ -480,14 +519,17 @@ def main():
     # l'arrivee (10 jours de voyage -> 9 trajets journaliers). Sur 950 km /
     # 9 jours, ca fait bien ~106 km/jour, pas ~250 km comme avec l'ancien
     # "-2" (qui divisait par un nombre de jours trop petit).
-    ideal_stage_km = total_distance_km / (config.trip_days - 1)
-    n_stages = max(int(round(total_distance_km / ideal_stage_km)) - 1, 0)
+    route_legs = max(config.trip_days - 1, 1)
+    ideal_stage_km = total_distance_km / route_legs
+    minimum_city_distance_km = total_distance_km / max(
+        getattr(config, "city_spacing_divisor", 12), 1
+    )
+    # Il y a au maximum une ville entre deux troncons : avec 8 jours,
+    # 7 troncons donnent donc au plus 6 villes-etapes.
+    n_stages = max(route_legs - 1, 0)
     print(f"\nEtape ideale estimee : {ideal_stage_km:.1f} km "
           f"(distance totale {total_distance_km:.1f} km / "
           f"({config.trip_days}-1) jours) -> {n_stages} etape(s) intermediaire(s)")
-
-    # Points cibles intermediaires (etapes) le long du trajet.
-    stage_targets = [(ideal_stage_km * i, "etape") for i in range(1, n_stages + 1)]
 
     # Toutes les communes situees a moins de radius_km de la trace, OU
     # QU'ELLES SOIENT le long du trajet (pas seulement pile a un
@@ -495,20 +537,22 @@ def main():
     # tout le corridor du trajet, pas a un seul point precis. UNIQUEMENT
     # pour les etapes intermediaires : le depart et l'arrivee, eux, ne
     # doivent JAMAIS se deplacer le long de la trace (pas d'avance au
-    # depart, pas de recul a l'arrivee) -- ils utilisent une recherche
-    # stricte au point exact (voir plus bas, find_nearby_large_city).
-    towns_on_track = project_towns_on_track(
+    # depart, pas de recul a l'arrivee) -- ils utilisent la commune
+    # administrative du point exact via Nominatim (voir plus bas).
+    planner_towns_on_track = project_towns_on_track(
         raw_towns, track_lats, track_lons, track_cum_km, radius_km
     )
-    print(f"  -> {len(towns_on_track)} communes situees a moins de {radius_km} km "
-          f"de la trace (corridor des etapes intermediaires uniquement)")
+    print(f"  -> {len(planner_towns_on_track)} communes situees a moins de {radius_km} km "
+          "de la trace (corridor des etapes uniquement)")
 
     # Fusion des communes d'une meme agglomeration (ex: Chamalieres /
     # Clermont-Ferrand) : on ne garde que la plus grande de chaque groupe,
     # sinon une "etape" peut re-selectionner un quartier/une banlieue de la
     # grande ville juste choisie a l'intervalle precedent.
     urban_cluster_radius_km = getattr(config, "urban_cluster_radius_km", 8)
-    towns_on_track = dedupe_urban_clusters(towns_on_track, urban_cluster_radius_km)
+    towns_on_track = dedupe_urban_clusters(
+        planner_towns_on_track, urban_cluster_radius_km
+    )
     print(f"  -> {len(towns_on_track)} communes apres fusion des agglomerations "
           f"(rayon {urban_cluster_radius_km} km, on garde la plus grande de "
           f"chaque groupe)")
@@ -517,17 +561,71 @@ def main():
     # intervalle ideal : une ville plus eloignee de son intervalle que la
     # moitie d'une etape appartient plutot a l'etape voisine.
     max_deviation_km = ideal_stage_km / 2.0
-    stage_assignments = assign_stage_towns(stage_targets, towns_on_track, max_deviation_km)
+    endpoint_points = [
+        track_point_at_km(0, track_lats, track_lons, track_cum_km),
+        track_point_at_km(total_distance_km, track_lats, track_lons, track_cum_km),
+    ]
+    quarter = total_distance_km / 4
+    anchor_candidates = [
+        town for town in towns_on_track
+        if quarter <= town["track_km"] <= total_distance_km - quarter
+        and all(haversine_km(town["lat"], town["lon"], lat, lon)
+                >= minimum_city_distance_km for lat, lon in endpoint_points)
+    ]
+    anchor = max(anchor_candidates, key=lambda town: (
+        float(town.get("population") or 0), -town["dist_to_track_km"]
+    )) if anchor_candidates else None
 
-    geolocator = None  # instancie seulement si necessaire (fallback Nominatim)
+    if anchor is not None and n_stages:
+        remaining = n_stages - 1
+        left_slots = remaining // 2
+        right_slots = remaining - left_slots
+        # Une cible supplémentaire de chaque côté donne plus de choix à
+        # l'optimiseur avant qu'il ne ramène le total à n_stages.
+        left_candidates = left_slots + 1
+        right_candidates = right_slots + 1
+        left_targets = [
+            (anchor["track_km"] * i / (left_candidates + 1), "etape")
+            for i in range(1, left_candidates + 1)
+        ]
+        right_targets = [
+            (anchor["track_km"] + (total_distance_km - anchor["track_km"])
+             * i / (right_candidates + 1), "etape")
+            for i in range(1, right_candidates + 1)
+        ]
+        other_targets = left_targets + right_targets
+        stage_assignments = assign_stage_towns(
+            other_targets, towns_on_track, max_deviation_km,
+            minimum_distance_km=minimum_city_distance_km,
+            fixed_points=endpoint_points + [(anchor["lat"], anchor["lon"])],
+            max_assignments=remaining,
+        )
+        anchor_target = (anchor["track_km"], "etape")
+        stage_targets = sorted(other_targets + [anchor_target])
+        stage_assignments[anchor_target] = anchor
+        print(f"  -> Ville-ancre : {anchor['name']} ({int(anchor.get('population') or 0)} "
+              f"habitants, km {anchor['track_km']:.1f}) ; {left_candidates} cible(s) "
+              f"avant et {right_candidates} apres, puis {remaining} retenue(s)")
+    else:
+        stage_targets = [(ideal_stage_km * i, "etape") for i in range(1, n_stages + 1)]
+        stage_assignments = assign_stage_towns(
+            stage_targets, towns_on_track, max_deviation_km,
+            minimum_distance_km=minimum_city_distance_km,
+            fixed_points=endpoint_points,
+        )
+
+    geolocator = Nominatim(user_agent="town_tcrouzet")
+    endpoint_cache = {}
     rows = []
     used_names = set()
 
-    print(f"\nDepart/arrivee : recherche STRICTE au point exact (rayon "
-          f"{radius_km} km, aucun deplacement le long de la trace). "
+    print("\nDepart/arrivee : commune administrative contenant exactement "
+          "le point GPX (aucune recherche de ville dans un rayon). "
           f"Etapes intermediaires : ville la plus proche de la trace dans "
           f"un rayon de {radius_km} km, avec un ecart max de "
-          f"{max_deviation_km:.1f} km par rapport a l'intervalle ideal...")
+          f"{max_deviation_km:.1f} km par rapport a l'intervalle ideal et "
+          f"au moins {minimum_city_distance_km:.1f} km a vol d'oiseau "
+          "entre villes...")
 
     targets = [(0.0, "depart")] + stage_targets + [(total_distance_km, "arrivee")]
 
@@ -535,28 +633,28 @@ def main():
         lat, lon = track_point_at_km(target_km, track_lats, track_lons, track_cum_km)
 
         if role in ("depart", "arrivee"):
-            # Recherche STRICTE au point exact (depart/arrivee ne doivent
-            # jamais se deplacer le long de la trace, meme de quelques km).
-            town = find_nearby_large_city(lat, lon, raw_towns, radius_km)
-            if town is not None and town["name"] in used_names:
-                town = None
+            # Une boucle reutilise la reponse du depart si ses extremites
+            # sont a moins d'une centaine de metres l'une de l'autre.
+            endpoint_key = (round(float(lat), 3), round(float(lon), 3))
+            name = endpoint_cache.get(endpoint_key)
+            if name is None:
+                name = get_endpoint_city(lat, lon, geolocator, label=role)
+                if name is None:
+                    name = get_nearest_endpoint_place(
+                        lat, lon, raw_towns,
+                        getattr(config, "endpoint_fallback_radius_km", 2),
+                    )
+                if name:
+                    endpoint_cache[endpoint_key] = name
+                time.sleep(1.1)
+            town = ({"name": name, "lat": lat, "lon": lon, "population": None}
+                    if name else None)
         else:
             town = stage_assignments[(target_km, role)]
             if town is not None and town["name"] in used_names:
                 # Deja pris comme depart (rare, mais possible si le depart
                 # tombe dans la fenetre d'une etape) : on ne le duplique pas.
                 town = None
-
-        if town is None and role in ("depart", "arrivee"):
-            # Dernier recours pour le depart/l'arrivee uniquement (on veut
-            # toujours un nom a ces deux points) : Nominatim, meme si la
-            # "ville" trouvee est en realite un hameau/village minuscule.
-            if geolocator is None:
-                geolocator = Nominatim(user_agent="town_tcrouzet")
-            name = get_endpoint_city(lat, lon, geolocator, label=role)
-            time.sleep(1.1)
-            if name:
-                town = {"name": name, "lat": lat, "lon": lon, "population": None}
 
         if town is None:
             if role == "etape":
@@ -586,6 +684,48 @@ def main():
             "population": town.get("population"),
             "distance_km": round(actual_km, 1),
             "role": role,
+        })
+
+    # Une boucle dont les extrémités sont dans la même zone ne doit pas
+    # afficher deux marqueurs superposés. Un seul point représente alors
+    # simultanément le départ et l'arrivée.
+    endpoint_rows = [row for row in rows if row["role"] in ("depart", "arrivee")]
+    if len(endpoint_rows) == 2 and haversine_km(
+        endpoint_rows[0]["lat"], endpoint_rows[0]["lon"],
+        endpoint_rows[1]["lat"], endpoint_rows[1]["lon"],
+    ) < minimum_city_distance_km:
+        departure, arrival = endpoint_rows
+        departure["role"] = "depart/arrivee"
+        if departure["name"] != arrival["name"]:
+            departure["name"] = f'{departure["name"]} / {arrival["name"]}'
+        rows.remove(arrival)
+
+    # Les communes secondaires alimentent le calcul du planning mais ne sont
+    # pas affichées comme marqueurs sur la carte principale.
+    selected_names = {row["name"] for row in rows}
+    planning_towns = select_planning_towns(
+        planner_towns_on_track, total_distance_km,
+        getattr(config, "planning_city_interval_km", 25),
+    )
+    weather_interval = getattr(config, "planning_weather_interval_km", 100)
+    weather_checkpoint_names = {
+        min(planner_towns_on_track, key=lambda town: abs(town["track_km"] - target))["name"]
+        for target in np.arange(weather_interval, total_distance_km, weather_interval)
+    }
+    planning_by_name = {town["name"]: town for town in planning_towns}
+    for town in planner_towns_on_track:
+        if town["name"] in weather_checkpoint_names:
+            planning_by_name[town["name"]] = town
+    planning_towns = sorted(planning_by_name.values(), key=lambda town: town["track_km"])
+    for town in planning_towns:
+        if town["name"] in selected_names:
+            continue
+        rows.append({
+            "name": town["name"], "lat": town["lat"], "lon": town["lon"],
+            "population": town.get("population"),
+            "distance_km": round(float(town["track_km"]), 1),
+            "role": ("meteo" if town["name"] in weather_checkpoint_names
+                     else "planning"),
         })
 
     df = pd.DataFrame(rows).sort_values("distance_km").reset_index(drop=True)
