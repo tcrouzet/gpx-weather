@@ -63,6 +63,9 @@ city_spacing_divisor = 18
 # ajouter environ 6,67 km plats par tranche de 100 m de montée.
 planning_climb_km_per_100m = 6.6667
 planning_daily_riding_hours = 12
+# Temps de roulage effectif dans la plage quotidienne de 12 heures.
+# Il ne modifie pas le découpage, seulement la vitesse affichée.
+planning_daily_moving_hours = 9
 
 # Le filtre médian élimine le bruit GPS sans écraser les petites montées.
 # Une fenêtre de 5 points restitue environ 7 150 m D+ sur la trace g727.
