@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
   schedule:
-    # Les deux conversions UTC possibles sont filtrées ensuite avec le fuseau
-    # Europe/Paris, afin de conserver les mêmes heures après le changement
-    # heure d'été / heure d'hiver.
-    - cron: "0 4,5,7,8,10,11,14,15,20,21 * * *"
+    # Toutes les 3 heures environ (UTC). Comme GitHub retarde parfois les
+    # crons planifiés, on ne filtre plus par heure locale au runtime : le
+    # build s'exécute systématiquement à chaque déclenchement.
+    - cron: "0 4,7,10,14,20 * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,28 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  horaire:
-    runs-on: ubuntu-latest
-    outputs:
-      lancer: ${{ steps.verifier.outputs.lancer }}
-    steps:
-      - id: verifier
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT_NAME" != "schedule" ]; then
-            echo "lancer=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          heure="$(TZ=Europe/Paris date +%H)"
-          case "$heure" in
-            06|09|12|16|22) echo "lancer=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "lancer=false" >> "$GITHUB_OUTPUT" ;;
-          esac
-
   build:
-    needs: horaire
-    if: needs.horaire.outputs.lancer == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
