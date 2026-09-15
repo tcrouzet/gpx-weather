@@ -61,10 +61,11 @@ city_spacing_divisor = 18
 # Modèle d'effort non linéaire selon la pente de chaque segment.
 planning_climb_coefficient = 0.003
 planning_climb_exponent = 3.0
+planning_grade_chunk_km = 0.1
 planning_descent_linear_coefficient = 0.07
 planning_descent_quadratic_coefficient = -0.002
 planning_descent_max_grade_pct = 10.0
-planning_fatigue_speed_loss_kmh = 0.5
+planning_fatigue_speed_loss_kmh = 0.25
 planning_daily_riding_hours = 12
 # Temps de roulage effectif dans la plage quotidienne de 12 heures.
 # Il ne modifie pas le découpage, seulement la vitesse affichée.

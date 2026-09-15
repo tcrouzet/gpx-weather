@@ -117,7 +117,9 @@ replie sur lui-même.
 ### Découpage quotidien du voyage
 
 Le découpage ne partage pas simplement les kilomètres. Après lissage médian des
-altitudes, chaque segment est pondéré selon sa pente. En montée, le
+altitudes, la trace est regroupée en tronçons réels d'environ 100 m. Leur pente
+moyenne pondère l'effort, sans utiliser les minuscules segments GPX bruts qui
+amplifieraient le bruit d'altitude. En montée, le
 multiplicateur est :
 
 ```text
@@ -127,7 +129,7 @@ multiplicateur est :
 En descente jusqu'à 10 %, un rabais quadratique réduit l'effort ; au-delà de
 10 %, aucun gain supplémentaire n'est accordé. Cela évite de considérer les
 descentes très raides comme artificiellement rapides. L'effort total est ensuite
-réparti entre les jours avec une perte de vitesse de 0,5 km/h par jour : les
+réparti entre les jours avec une perte de vitesse de 0,25 km/h par jour : les
 premiers jours sont un peu plus longs et les derniers un peu plus courts. Chaque
 limite d'effort est enfin reconvertie en position kilométrique sur la trace.
 

@@ -81,7 +81,7 @@ def stored_url(value):
 
 
 def climb_descent_effort(delta_elevation_m, segment_distance_km):
-    """Convertit un segment en distance d'effort selon sa pente."""
+    """Convertit un tronçon en distance d'effort selon sa pente moyenne."""
     if segment_distance_km <= 0:
         return segment_distance_km
     grade_pct = (delta_elevation_m / 1000) / segment_distance_km * 100
@@ -116,23 +116,37 @@ def load_track(path, simplify=True):
     cumulative_effort = 0.0
     cumulative_ascent = 0.0
     profile = [{"distance": 0.0, "effort": 0.0, "ascent": 0.0}]
-    last_profile_distance = 0.0
+    chunk_step_km = getattr(config, "planning_grade_chunk_km", 0.1)
+    chunk_start_distance = 0.0
+    chunk_start_elevation = float(elevations.iloc[0])
+    chunk_ascent = 0.0
     for index, (a, b) in enumerate(zip(exact_coordinates, exact_coordinates[1:]), 1):
         segment_distance = 2 * 6371.0088 * math.asin(math.sqrt(
             math.sin(math.radians(b[0] - a[0]) / 2) ** 2
             + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0]))
             * math.sin(math.radians(b[1] - a[1]) / 2) ** 2
         ))
-        delta_elevation = float(elevations.iloc[index] - elevations.iloc[index - 1])
-        ascent = max(0.0, delta_elevation)
         cumulative_distance += segment_distance
-        cumulative_effort += climb_descent_effort(delta_elevation, segment_distance)
-        cumulative_ascent += ascent
-        if cumulative_distance - last_profile_distance >= 1 or index == len(points) - 1:
+        point_delta = float(elevations.iloc[index] - elevations.iloc[index - 1])
+        chunk_ascent += max(0.0, point_delta)
+        is_last_point = index == len(points) - 1
+        if cumulative_distance - chunk_start_distance >= chunk_step_km or is_last_point:
+            chunk_distance = cumulative_distance - chunk_start_distance
+            chunk_net_delta = float(elevations.iloc[index]) - chunk_start_elevation
+            # Le reliquat final peut mesurer moins de 100 m : il reste neutre
+            # plutôt que de réintroduire précisément la division instable que
+            # le regroupement cherche à supprimer.
+            cumulative_effort += (
+                climb_descent_effort(chunk_net_delta, chunk_distance)
+                if chunk_distance >= chunk_step_km else chunk_distance
+            )
+            cumulative_ascent += chunk_ascent
             profile.append({"distance": round(cumulative_distance, 2),
                             "effort": round(cumulative_effort, 2),
                             "ascent": round(cumulative_ascent, 1)})
-            last_profile_distance = cumulative_distance
+            chunk_start_distance = cumulative_distance
+            chunk_start_elevation = float(elevations.iloc[index])
+            chunk_ascent = 0.0
     coordinates = [(p.longitude, p.latitude) for p in points]
     if simplify:
         tolerance = getattr(config, "gpx_simplify_degrees", .0003)
