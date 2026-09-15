@@ -11,6 +11,7 @@ import csv
 import json
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -71,11 +72,49 @@ def publish_pages():
     print(f"Publication GitHub Pages déclenchée : {config.github_pages_base_url}/")
 
 
+def build_version():
+    return str(int(time.time()))
+
+
+def write_service_worker(output_dir, root_path, version):
+    """Génère un Service Worker propre à ce build, réellement network-first."""
+    template = """const CACHE = 'gpx-weather-{version}';
+const ROOT = '{root}';
+const SHELL = [ROOT, `${{ROOT}}manifest.webmanifest`, `${{ROOT}}icon-192.png`, `${{ROOT}}icon-512.png`];
+
+self.addEventListener('install', event => {{
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
+  self.skipWaiting();
+}});
+
+self.addEventListener('activate', event => {{
+  event.waitUntil(caches.keys().then(keys => Promise.all(
+    keys.filter(key => key !== CACHE).map(key => caches.delete(key))
+  )));
+  self.clients.claim();
+}});
+
+self.addEventListener('fetch', event => {{
+  if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
+  event.respondWith(fetch(event.request, {{cache: 'no-store'}}).then(response => {{
+    const copy = response.clone();
+    caches.open(CACHE).then(cache => cache.put(event.request, copy));
+    return response;
+  }}).catch(() => caches.match(event.request).then(response => response || caches.match(ROOT))));
+}});
+"""
+    content = template.format(version=version, root=root_path)
+    with open(os.path.join(output_dir, "sw.js"), "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
 def write_routes_index(routes):
     """Crée l'accueil Pages avec l'aide et la liste des parcours."""
     os.makedirs(config.output_root, exist_ok=True)
-    for asset in ("manifest.webmanifest", "sw.js", "icon-192.png", "icon-512.png", "apple-touch-icon.png"):
+    for asset in ("manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"):
         shutil.copy2(os.path.join(config.BASE_DIR, "webapp", asset), config.output_root)
+    root_path = urlparse(config.github_pages_base_url).path.rstrip("/") + "/"
+    write_service_worker(config.output_root, root_path, build_version())
     route_links = render_route_links(routes)
     navigation_html = render_navigation("GPX Weather", routes, "./")
     html = f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
@@ -103,7 +142,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</scri
     # GitHub Pages renvoie ce document pour les URL dynamiques de planning.
     # Il recharge la page de la trace avec un paramètre transitoire ; carto.py
     # restaure ensuite l'URL /forecast/... dans la barre d'adresse.
-    base_path = urlparse(config.github_pages_base_url).path.rstrip("/") + "/"
+    base_path = root_path
     slugs = json.dumps([slug for slug, _ in routes], ensure_ascii=False)
     fallback = f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GPX Weather</title></head>
