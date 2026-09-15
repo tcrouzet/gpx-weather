@@ -73,6 +73,13 @@ def meteofrance_url(name, postcode=None, geoname_id=None):
     return None
 
 
+def stored_url(value):
+    """Convertit la sentinelle CSV d'une recherche infructueuse en absence de lien."""
+    if value is None or pd.isna(value) or str(value).strip() in {"", "-"}:
+        return None
+    return str(value).strip()
+
+
 def load_track(path, simplify=True):
     with open(path, "r", encoding="utf-8") as handle:
         gpx = gpxpy.parse(handle)
@@ -273,10 +280,9 @@ def make_payload(forecasts, route, route_distance_km, route_profile):
             "meteofrance_url": meteofrance_url(
                 place["name"], place.get("postcode"), place.get("geoname_id")
             ),
-            "wunderground_url": (
-                None if pd.isna(place.get("wunderground_url"))
-                else str(place.get("wunderground_url"))
-            ),
+            "wunderground_url": stored_url(place.get("wunderground_url")),
+            "meteociel_url": stored_url(place.get("meteociel_url")),
+            "lachainemeteo_url": stored_url(place.get("lachainemeteo_url")),
         })
     return {"route": route, "route_distance_km": round(route_distance_km, 1),
             "route_profile": route_profile,
@@ -370,7 +376,7 @@ display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-i
 .planner-form{{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:10px;margin-bottom:14px}}.planner-form label{{min-width:0;font-size:12px;font-weight:750}}
 .planner-form input{{display:block;width:100%;height:42px;min-height:42px;margin-top:4px;border:1px solid #cbd1df;border-radius:8px;background:#fff;padding:7px;font:inherit;line-height:26px;color:#17234d}}
 .trip-days{{display:grid;gap:0}}.trip-day{{background:#fff;padding:9px}}.trip-day-head{{display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}}.trip-day-head span{{font-size:11px;color:#68708c}}
-.trip-metrics{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}}.trip-stop{{position:relative;display:flex;width:100%;min-width:0;min-height:104px;border:0;background:#f1f3f8;color:inherit;font:inherit;border-radius:8px;padding:7px;text-align:center;flex-direction:column;align-items:stretch;cursor:pointer;box-shadow:inset 0 0 0 1px #cfd5e2}}.trip-stop:hover,.trip-stop:focus-visible{{background:#e2e6ef;outline:2px solid #315bb5;outline-offset:1px}}.trip-stop:active{{background:#d8deea}}.trip-stop strong{{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.trip-stop-value{{display:block;font-size:18px;font-weight:850;margin:3px 0 0}}.trip-weather-icon{{font-size:24px;vertical-align:middle;margin-right:3px}}.trip-wind{{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:0;font-size:10px;font-weight:750;color:#4c5875;white-space:nowrap}}.trip-wind-arrow{{display:inline-block;font-size:18px;line-height:1}}.trip-gust{{display:inline-block;padding:3px 5px;border-radius:5px;background:#e53935;color:#fff;font-size:9px;font-weight:850}}.weather-source-links{{display:flex;justify-content:center;gap:7px;margin-top:auto;padding-top:4px}}.meteofrance-link{{color:#315bb5;font-size:9px;font-weight:750;text-decoration:none}}.meteofrance-link:hover{{text-decoration:underline}}
+.trip-metrics{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}}.trip-stop{{position:relative;display:flex;width:100%;min-width:0;min-height:104px;border:0;background:#f1f3f8;color:inherit;font:inherit;border-radius:8px;padding:7px;text-align:center;flex-direction:column;align-items:stretch;cursor:pointer;box-shadow:inset 0 0 0 1px #cfd5e2}}.trip-stop:hover,.trip-stop:focus-visible{{background:#e2e6ef;outline:2px solid #315bb5;outline-offset:1px}}.trip-stop:active{{background:#d8deea}}.trip-stop strong{{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.trip-stop-value{{display:block;font-size:18px;font-weight:850;margin:3px 0 0}}.trip-weather-icon{{font-size:24px;vertical-align:middle;margin-right:3px}}.trip-wind{{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:0;font-size:10px;font-weight:750;color:#4c5875;white-space:nowrap}}.trip-wind-arrow{{display:inline-block;font-size:18px;line-height:1}}.trip-gust{{display:inline-block;padding:3px 5px;border-radius:5px;background:#e53935;color:#fff;font-size:9px;font-weight:850}}.weather-source-links{{display:flex;flex-wrap:wrap;justify-content:center;gap:2px 7px;margin-top:auto;padding-top:4px}}.meteofrance-link{{color:#315bb5;font-size:9px;font-weight:750;text-decoration:none}}.meteofrance-link:hover{{text-decoration:underline}}
 .trip-unavailable{{color:#8b90a0;font-size:13px}}
 @media(max-width:600px){{.details-shell{{padding:7px 7px}}.panel-title{{font-size:18px}}.metric-grid{{grid-template-columns:repeat(2,1fr);gap:5px}}
 .metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}.trip-planner{{padding:9px 7px}}.planner-form{{grid-template-columns:1fr 1fr;gap:7px}}.planner-form label:first-child{{grid-column:1/-1}}.planner-form input{{height:42px;min-height:42px;padding:7px}}.trip-day{{padding:7px}}.trip-metrics{{gap:4px}}.trip-stop{{padding:6px 3px;min-height:100px}}.trip-stop-value{{font-size:16px}}}}
@@ -420,7 +426,7 @@ function endpointTown(role){{return data.planner_towns.find(town=>town.role.incl
 function noonPlannerTown(distance,morningTown,eveningTown,lastDay){{const upper=lastDay?data.route_distance_km:eveningTown.distance_km,distinct=data.planner_towns.filter(town=>town.name!==morningTown.name&&town.name!==eveningTown.name),candidates=distinct.filter(town=>town.distance_km>morningTown.distance_km+1&&town.distance_km<upper-1),pool=candidates.length?candidates:distinct;return pool.length?pool.reduce((best,town)=>Math.abs(town.distance_km-distance)<Math.abs(best.distance_km-distance)?town:best):nearestPlannerTown(distance)}}
 function townForecast(town,date){{const weatherTown=data.weather_towns.find(candidate=>candidate.id===town?.weather_town_id);return weatherTown?.daily.find(row=>row.date===date)}}
 function plannerCardAttrs(town,date,hour){{return `role="button" tabindex="0" data-town="${{encodeURIComponent(town.name)}}" data-date="${{date}}" data-hour="${{hour}}"`}}
-function weatherSourceLinks(town){{const links=[];if(town?.meteofrance_url)links.push(`<a class="meteofrance-link" href="${{town.meteofrance_url}}" target="_blank" rel="noopener">Météo-France</a>`);if(town?.wunderground_url)links.push(`<a class="meteofrance-link" href="${{town.wunderground_url}}" target="_blank" rel="noopener">WUnderground</a>`);return links.length?`<span class="weather-source-links">${{links.join('')}}</span>`:''}}
+function weatherSourceLinks(town){{const links=[];if(town?.meteofrance_url)links.push(`<a class="meteofrance-link" href="${{town.meteofrance_url}}" target="_blank" rel="noopener">Météo-France</a>`);if(town?.wunderground_url)links.push(`<a class="meteofrance-link" href="${{town.wunderground_url}}" target="_blank" rel="noopener">WUnderground</a>`);if(town?.meteociel_url)links.push(`<a class="meteofrance-link" href="${{town.meteociel_url}}" target="_blank" rel="noopener">Meteociel</a>`);if(town?.lachainemeteo_url)links.push(`<a class="meteofrance-link" href="${{town.lachainemeteo_url}}" target="_blank" rel="noopener">La Chaîne Météo</a>`);return links.length?`<span class="weather-source-links">${{links.join('')}}</span>`:''}}
 function conditionCard(title,town,conditions,date,hour){{if(!conditions)return `<div class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town?.name??'—'}}</strong><span class="trip-unavailable">Indisponible</span>${{weatherSourceLinks(town)}}</div>`;const gust=conditions.gusts>conditions.wind?`<span class="trip-gust">${{conditions.gusts}} km/h</span>`:'';return `<div class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[conditions.weather]}}</b>${{conditions.temperature}}°</span><span class="trip-wind"><i class="trip-wind-arrow" style="transform:rotate(${{(conditions.wind_degrees+180)%360}}deg)">↑</i><span>${{conditions.wind}} km/h</span>${{gust}}</span>${{weatherSourceLinks(town)}}</div>`}}
 function renderPlanner(){{const duration=Math.max(1,Math.min(16,Number(tripDuration.value)||1)),start=localDate(tripStart.value),departureParts=(tripTime.value||'08:00').split(':').map(Number),departureHour=departureParts[0]+departureParts[1]/60,totalEffort=data.route_profile.at(-1).effort,dailyEffort=totalEffort/duration,rideHours=data.planning_daily_riding_hours,movingHours=data.planning_daily_moving_hours,arrivalClock=departureHour+rideHours,arrivalHour=Math.round(arrivalClock)%24,arrivalDayOffset=Math.floor(Math.round(arrivalClock)/24);localStorage.setItem(plannerKey,JSON.stringify({{start:tripStart.value,duration,time:tripTime.value}}));
   const nightTowns=Array.from({{length:duration+1}},(_,index)=>index===0?endpointTown('depart'):index===duration?endpointTown('arrivee'):nearestPlannerTown(distanceAtEffort(dailyEffort*index)));

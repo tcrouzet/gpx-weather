@@ -128,7 +128,19 @@ def process_route(gpx_path):
     towns_schema_current = False
     if os.path.exists(config.towns_csv_path):
         with open(config.towns_csv_path, encoding="utf-8", newline="") as handle:
-            towns_schema_current = "wunderground_url" in (next(csv.reader(handle), []))
+            reader = csv.DictReader(handle)
+            columns = set(reader.fieldnames or [])
+            rows = list(reader)
+            source_columns = {
+                "wunderground_url", "meteociel_url", "lachainemeteo_url",
+            }
+            towns_schema_current = {
+                "elevation", "wunderground_url", "meteociel_url",
+                "lachainemeteo_url", "country_code",
+            } <= columns and all(
+                (row.get(column) or "").strip()
+                for row in rows for column in source_columns
+            )
     if not towns_schema_current:
         run_step("town", "Étape 1 : town")
     else:

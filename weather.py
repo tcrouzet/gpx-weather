@@ -66,6 +66,8 @@ def load_towns(towns_csv_path):
     missing = required - set(df.columns)
     if missing:
         sys.exit(f"Colonnes manquantes dans {towns_csv_path} : {missing}")
+    if "elevation" not in df.columns:
+        df["elevation"] = None
 
     # Les lignes "planning" servent uniquement à nommer précisément les
     # lieux de passage. Leur météo est celle du point principal le plus proche.
@@ -111,14 +113,15 @@ def active_window_start_utc():
     return (active_day + pd.Timedelta(hours=active_hour)).tz_convert("UTC")
 
 
-def get_forecast_for_point(client, lat, lon, forecast_days=16):
+def get_forecast_for_point(client, lat, lon, elevation=None, forecast_days=16,
+                           model="meteofrance_seamless"):
     """Recupere la prevision horaire pour un point donne, aussi loin que
     possible dans le temps (jusqu'a forecast_days, 16 jours max chez
     Open-Meteo).
 
-    models="best_match" : Open-Meteo choisit automatiquement le meilleur
-    modele disponible (AROME haute resolution a court terme, puis
-    ARPEGE / GFS / ECMWF au-dela, selon la region et l'horizon)."""
+    Le modèle Météo-France fusionné (AROME + ARPEGE) est utilisé à courte
+    échéance. ``best_match`` n'est demandé qu'en repli lorsqu'il manque des
+    données avant la bascule vers l'ensemble ECMWF."""
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
@@ -132,9 +135,11 @@ def get_forecast_for_point(client, lat, lon, forecast_days=16):
             "wind_direction_10m",
         ],
         "forecast_days": forecast_days,
-        "models": "best_match",
+        "models": model,
         "timezone": "auto",
     }
+    if elevation is not None and pd.notna(elevation):
+        params["elevation"] = float(elevation)
 
     responses = client.weather_api(url, params=params)
     resp = responses[0]
@@ -167,6 +172,47 @@ def get_forecast_for_point(client, lat, lon, forecast_days=16):
     df = df[df["time"] >= active_window_start_utc()].reset_index(drop=True)
 
     return df
+
+
+def get_short_range_forecast(client, lat, lon, elevation, forecast_days,
+                             ensemble_after_days):
+    """Prévision Météo-France complétée par best_match uniquement si nécessaire."""
+    target_end = (
+        pd.Timestamp.now(tz="UTC").normalize()
+        + pd.Timedelta(days=min(forecast_days, ensemble_after_days))
+    )
+    try:
+        meteofrance = get_forecast_for_point(
+            client, lat, lon, elevation, min(forecast_days, 4),
+            model="meteofrance_seamless",
+        )
+        required = ["temperature", "weather_code", "wind_speed", "wind_gusts"]
+        meteofrance = meteofrance.dropna(subset=required).copy()
+        meteofrance["data_source"] = "meteofrance_seamless"
+    except Exception as error:
+        print(f"     Météo-France indisponible, repli best_match : {error}")
+        meteofrance = pd.DataFrame()
+
+    # Le modèle Météo-France s'arrête vers J+4 tandis que la bascule ECMWF
+    # est normalement à J+5. best_match ne sert qu'à combler cet éventuel
+    # jour de transition (ou toute la fenêtre hors zone de couverture).
+    last_time = meteofrance["time"].max() if not meteofrance.empty else None
+    needs_fallback = last_time is None or last_time < target_end - pd.Timedelta(hours=1)
+    if not needs_fallback:
+        return meteofrance
+
+    fallback = get_forecast_for_point(
+        client, lat, lon, elevation,
+        min(forecast_days, ensemble_after_days), model="best_match",
+    )
+    fallback["data_source"] = "best_match"
+    if meteofrance.empty:
+        return fallback
+    return (
+        pd.concat([fallback, meteofrance], ignore_index=True)
+        .sort_values("time").drop_duplicates("time", keep="last")
+        .reset_index(drop=True)
+    )
 
 
 def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
@@ -285,14 +331,15 @@ def fetch_all_forecasts(client, ensemble_session, towns, forecast_days=16, ensem
             f"({town['role']}, km {town['distance_km']}) "
             f"lat={town['lat']:.4f}, lon={town['lon']:.4f}"
         )
-        deterministic = get_forecast_for_point(client, town["lat"], town["lon"], forecast_days)
+        deterministic = get_short_range_forecast(
+            client, town["lat"], town["lon"], town.get("elevation"),
+            forecast_days, ensemble_after_days,
+        )
         deterministic["temperature_low"] = deterministic["temperature"]
         deterministic["temperature_high"] = deterministic["temperature"]
         deterministic["precipitation_probability"] = np.where(
             deterministic["precipitation"] >= .1, 100.0, 0.0
         )
-        deterministic["data_source"] = "best_match"
-
         ensemble = get_ecmwf_ensemble_for_point(
             ensemble_session, town["lat"], town["lon"], min(forecast_days, 15)
         )
@@ -318,7 +365,7 @@ def main():
     towns = load_towns(config.towns_csv_path)
     print(f"  -> {len(towns)} villes ({', '.join(t['name'] for t in towns)})")
 
-    print(f"\nRecuperation des previsions meteo (Open-Meteo, best_match, "
+    print(f"\nRecuperation des previsions meteo (Météo-France puis ECMWF, "
           f"{config.forecast_days} jours max)...")
     client = build_openmeteo_client()
     ensemble_session = build_http_session()

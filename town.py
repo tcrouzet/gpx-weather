@@ -45,12 +45,15 @@ Usage :
 
 import os
 import csv
+import html as html_module
+from html.parser import HTMLParser
 import re
 import ssl
 import sys
 import time
 import unicodedata
 import zipfile
+from urllib.parse import urlencode, urljoin, urlparse
 
 import numpy as np
 import pandas as pd
@@ -153,7 +156,7 @@ EARTH_RADIUS_KM = 6371.0088
 # ---------------------------------------------------------------------------
 
 def load_gpx_track(gpx_path):
-    """Charge tous les points de la trace GPX (lat, lon), sans echantillonnage.
+    """Charge tous les points de la trace GPX (lat, lon, altitude), sans echantillonnage.
 
     Affiche un diagnostic sur le nombre de tracks/segments presents dans le
     fichier : un GPX avec plusieurs <trk> ou <trkseg> peut cacher des sauts
@@ -169,9 +172,12 @@ def load_gpx_track(gpx_path):
 
     for ti, track in enumerate(gpx.tracks):
         for si, segment in enumerate(track.segments):
-            seg_points = [(p.latitude, p.longitude) for p in segment.points]
+            seg_points = [
+                (p.latitude, p.longitude, p.elevation or 0.0)
+                for p in segment.points
+            ]
             if points and seg_points:
-                gap = geodesic(points[-1], seg_points[0]).km
+                gap = geodesic(points[-1][:2], seg_points[0][:2]).km
                 if gap > JUMP_WARNING_KM:
                     print(
                         f"  !! Saut suspect de {gap:.1f} km entre la fin du "
@@ -183,7 +189,7 @@ def load_gpx_track(gpx_path):
     if not points:
         for route in gpx.routes:
             for p in route.points:
-                points.append((p.latitude, p.longitude))
+                points.append((p.latitude, p.longitude, p.elevation or 0.0))
 
     if not points:
         raise ValueError("Aucun point trouve dans le GPX.")
@@ -202,7 +208,7 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
 
 def build_track_arrays(points, warn=True):
-    """Construit les tableaux numpy (lat, lon) de la trace ainsi que la
+    """Construit les tableaux numpy (lat, lon, altitude) de la trace ainsi que la
     distance cumulee reelle (haversine) en km a chaque point.
 
     Si warn=True, signale chaque saut entre deux points consecutifs
@@ -210,6 +216,7 @@ def build_track_arrays(points, warn=True):
     de km entre deux points consecutifs d'une trace GPS est anormal."""
     lats = np.array([p[0] for p in points])
     lons = np.array([p[1] for p in points])
+    elevs = np.array([p[2] for p in points])
 
     step_km = haversine_km(lats[:-1], lons[:-1], lats[1:], lons[1:])
     cum_km = np.concatenate([[0.0], np.cumsum(step_km)])
@@ -230,7 +237,7 @@ def build_track_arrays(points, warn=True):
                     f"(entre les points {worst} et {worst + 1})"
                 )
 
-    return lats, lons, cum_km
+    return lats, lons, cum_km, elevs
 
 
 def track_point_at_km(target_km, track_lats, track_lons, track_cum_km):
@@ -239,6 +246,12 @@ def track_point_at_km(target_km, track_lats, track_lons, track_cum_km):
     ~150 km parcourus depuis le depart)."""
     idx = int(np.argmin(np.abs(track_cum_km - target_km)))
     return float(track_lats[idx]), float(track_lons[idx])
+
+
+def track_elevation_at_km(target_km, track_cum_km, track_elevs):
+    """Renvoie l'altitude GPX du point le plus proche de target_km."""
+    idx = int(np.argmin(np.abs(track_cum_km - target_km)))
+    return float(track_elevs[idx])
 
 
 # ---------------------------------------------------------------------------
@@ -319,18 +332,18 @@ def load_geonames_places():
         with bundle.open(filename) as handle:
             for raw_line in handle:
                 fields = raw_line.decode("utf-8").rstrip("\n").split("\t")
-                places.append((fields[0], float(fields[4]), float(fields[5])))
+                places.append((fields[0], float(fields[4]), float(fields[5]), fields[8]))
     return places
 
 
-def nearest_geoname_id(lat, lon, places, maximum_km=10):
-    """Identifiant du lieu habité GeoNames le plus proche, jamais une zone administrative."""
+def nearest_geoname_place(lat, lon, places, maximum_km=10):
+    """Identifiant et pays du lieu GeoNames habité le plus proche."""
     best = min(
         places,
         key=lambda place: float(haversine_km(lat, lon, place[1], place[2])),
     )
     distance = float(haversine_km(lat, lon, best[1], best[2]))
-    return best[0] if distance <= maximum_km else None
+    return (best[0], best[3]) if distance <= maximum_km else (None, None)
 
 
 def load_wunderground_stations():
@@ -355,25 +368,157 @@ def load_wunderground_stations():
 
 
 def wunderground_url(name, lat, lon, stations):
-    """Retourne uniquement une page WU réellement accessible."""
-    slug = "".join(
-        character for character in unicodedata.normalize("NFKD", str(name))
-        if not unicodedata.combining(character)
-    ).lower()
-    slug = "-".join(part for part in re.split(r"[^a-z0-9]+", slug) if part)
-    candidates = sorted(
-        stations,
-        key=lambda station: float(haversine_km(lat, lon, station[2], station[3])),
-    )[:4]
-    for station, country, _, _ in candidates:
-        url = f"https://www.wunderground.com/calendar/{country}/{slug}/{station}"
+    """Résout une fois la station WU la plus proche, puis utilise le cache."""
+    def resolve():
+        slug = "".join(
+            character for character in unicodedata.normalize("NFKD", str(name))
+            if not unicodedata.combining(character)
+        ).lower()
+        slug = "-".join(part for part in re.split(r"[^a-z0-9]+", slug) if part)
+        candidates = sorted(
+            stations,
+            key=lambda station: float(haversine_km(lat, lon, station[2], station[3])),
+        )[:4]
+        for station, country, _, _ in candidates:
+            url = f"https://www.wunderground.com/calendar/{country}/{slug}/{station}"
+            try:
+                response = requests.get(
+                    url, headers={"User-Agent": "GPXWeather/1.0"}, timeout=12
+                )
+                if response.status_code == 200:
+                    return url
+            except requests.RequestException:
+                continue
+        return None
+
+    return resolve()
+
+
+def meteociel_url(name, lat, lon):
+    """Résout l'identifiant Meteociel une fois via son moteur interne."""
+    def resolve():
         try:
-            response = requests.get(url, headers={"User-Agent": "GPXWeather/1.0"}, timeout=12)
-            if response.status_code == 200:
-                return url
+            response = requests.post(
+                "https://www.meteociel.fr/prevville.php",
+                data={"ville2": name},
+                headers={"User-Agent": "GPXWeather/1.0"},
+                timeout=15,
+                allow_redirects=True,
+            )
+            response.raise_for_status()
         except requests.RequestException:
-            continue
-    return None
+            return None
+        page = html_module.unescape(response.text)
+        matches = re.findall(
+            r'''href=["'](/previsions(?:-arome)?/(\d+)/([a-z0-9\-]+)\.htm)["']''',
+            page,
+            flags=re.IGNORECASE,
+        )
+        if not matches:
+            return None
+        _, meteociel_id, slug = matches[0]
+        return f"https://www.meteociel.fr/previsions-arome/{meteociel_id}/{slug}.htm"
+
+    return resolve()
+
+
+class LinkParser(HTMLParser):
+    """Extrait les liens et leur libellé sans dépendance HTML supplémentaire."""
+
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self._href = None
+        self._text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "a":
+            self._href = dict(attrs).get("href")
+            self._text = []
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.links.append((self._href, " ".join(self._text)))
+            self._href = None
+            self._text = []
+
+
+def lachainemeteo_url(name, lat, lon, postcode=None, country_code=None):
+    """Résout et mémorise la fiche ville depuis la recherche officielle."""
+    def resolve():
+        postal = ""
+        if postcode is not None and not pd.isna(postcode):
+            postal = str(postcode).split(".")[0].strip()
+        country_names = {
+            "FR": "France", "ES": "Espagne", "IT": "Italie",
+            "CH": "Suisse", "DE": "Allemagne", "BE": "Belgique",
+            "PT": "Portugal", "AD": "Andorre", "GB": "Royaume-Uni",
+            "SE": "Suède",
+        }
+        country = country_names.get(str(country_code or "").upper(), country_code or "")
+        terms = " ".join(
+            part for part in (str(name).strip(), str(country).strip(), postal) if part
+        )
+        search_url = (
+            "https://www.lachainemeteo.com/recherche-previsions-meteo?"
+            + urlencode({"q": terms})
+        )
+        try:
+            response = requests.get(
+                search_url,
+                headers={"User-Agent": "GPXWeather/1.0"},
+                timeout=15,
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            return None
+
+        # Certaines recherches peuvent rediriger directement vers la fiche.
+        if "recherche-previsions-meteo" not in response.url:
+            return response.url
+
+        parser = LinkParser()
+        try:
+            parser.feed(response.text)
+        except Exception:
+            return None
+        normalized_name = "".join(
+            character for character in unicodedata.normalize("NFKD", str(name))
+            if not unicodedata.combining(character)
+        ).casefold()
+        name_words = [word for word in re.split(r"[^a-z0-9]+", normalized_name) if word]
+        candidates = []
+        for href, label in parser.links:
+            url = urljoin(response.url, html_module.unescape(href))
+            parsed = urlparse(url)
+            if parsed.netloc not in {"www.lachainemeteo.com", "lachainemeteo.com"}:
+                continue
+            if "recherche-previsions-meteo" in parsed.path:
+                continue
+            if not any(marker in parsed.path for marker in (
+                "/meteo-", "/previsions-meteo", "/ville-"
+            )):
+                continue
+            haystack = html_module.unescape(f"{parsed.path} {label}").casefold()
+            score = sum(word in haystack for word in name_words) * 10
+            normalized_country = "".join(
+                character for character in unicodedata.normalize("NFKD", str(country))
+                if not unicodedata.combining(character)
+            ).casefold()
+            if normalized_country and normalized_country in haystack:
+                score += 100
+            if postal and postal in haystack:
+                score += 100
+            if score:
+                candidates.append((score, url))
+        return max(candidates, default=(0, None))[1]
+
+    return resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +751,7 @@ def main():
     points = load_gpx_track(config.gpx_file)
     print(f"  -> {len(points)} points dans la trace")
 
-    track_lats, track_lons, track_cum_km = build_track_arrays(points)
+    track_lats, track_lons, track_cum_km, track_elevs = build_track_arrays(points)
     total_distance_km = float(track_cum_km[-1])
     print(f"  -> Distance totale (haversine, reelle) : {total_distance_km:.1f} km")
 
@@ -745,6 +890,7 @@ def main():
 
     for target_km, role in targets:
         lat, lon = track_point_at_km(target_km, track_lats, track_lons, track_cum_km)
+        elevation = track_elevation_at_km(target_km, track_cum_km, track_elevs)
 
         if role in ("depart", "arrivee"):
             # Une boucle reutilise la reponse du depart si ses extremites
@@ -800,6 +946,7 @@ def main():
             "wikidata": town.get("wikidata"),
             "geoname_id": town.get("geoname_id"),
             "distance_km": round(actual_km, 1),
+            "elevation": round(elevation, 0),
             "role": role,
         })
 
@@ -851,6 +998,9 @@ def main():
             "wikidata": town.get("wikidata"),
             "geoname_id": town.get("geoname_id"),
             "distance_km": round(float(town["track_km"]), 1),
+            "elevation": round(track_elevation_at_km(
+                float(town["track_km"]), track_cum_km, track_elevs
+            ), 0),
             "role": ("meteo" if town["name"] in weather_checkpoint_names
                      else "planning"),
         })
@@ -858,6 +1008,20 @@ def main():
     postcode_cache = {}
     geonames_places = None
     wunderground_stations = None
+    existing_sources = {}
+    if os.path.exists(config.towns_csv_path):
+        try:
+            previous = pd.read_csv(config.towns_csv_path)
+            existing_sources = {
+                str(old["name"]): old for _, old in previous.iterrows()
+            }
+        except (OSError, ValueError):
+            existing_sources = {}
+
+    def previous_url(row, column):
+        value = existing_sources.get(str(row["name"]), {}).get(column)
+        return str(value).strip() if value is not None and pd.notna(value) and str(value).strip() else None
+
     for row in rows:
         # Seule la BAN détermine qu'une commune est française. Un code postal
         # OSM étranger ne doit jamais produire une URL /previsions-meteo-france/.
@@ -867,17 +1031,34 @@ def main():
         postcode = postcode_cache[key]
         row["postcode"] = postcode
         geoname_id = None
+        country_code = "FR" if postcode else None
         if not postcode:
             if geonames_places is None:
                 geonames_places = load_geonames_places()
-            geoname_id = nearest_geoname_id(
+            geoname_id, country_code = nearest_geoname_place(
                 row["lat"], row["lon"], geonames_places
             )
         row["geoname_id"] = geoname_id
-        if wunderground_stations is None:
-            wunderground_stations = load_wunderground_stations()
-        row["wunderground_url"] = wunderground_url(
-            row["name"], row["lat"], row["lon"], wunderground_stations
+        row["country_code"] = country_code
+        row["wunderground_url"] = previous_url(row, "wunderground_url")
+        if not row["wunderground_url"]:
+            if wunderground_stations is None:
+                wunderground_stations = load_wunderground_stations()
+            row["wunderground_url"] = wunderground_url(
+                row["name"], row["lat"], row["lon"], wunderground_stations
+            ) or "-"
+        row["meteociel_url"] = (
+            previous_url(row, "meteociel_url")
+            or meteociel_url(row["name"], row["lat"], row["lon"])
+            or "-"
+        )
+        row["lachainemeteo_url"] = (
+            previous_url(row, "lachainemeteo_url")
+            or lachainemeteo_url(
+                row["name"], row["lat"], row["lon"], row.get("postcode"),
+                row.get("country_code"),
+            )
+            or "-"
         )
 
     df = pd.DataFrame(rows).sort_values("distance_km").reset_index(drop=True)
