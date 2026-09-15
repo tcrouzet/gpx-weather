@@ -80,6 +80,26 @@ def stored_url(value):
     return str(value).strip()
 
 
+def climb_descent_effort(delta_elevation_m, segment_distance_km):
+    """Convertit un segment en distance d'effort selon sa pente."""
+    if segment_distance_km <= 0:
+        return segment_distance_km
+    grade_pct = (delta_elevation_m / 1000) / segment_distance_km * 100
+    if grade_pct >= 0:
+        multiplier = 1 + config.planning_climb_coefficient * grade_pct ** config.planning_climb_exponent
+    else:
+        descent_pct = abs(grade_pct)
+        if descent_pct <= config.planning_descent_max_grade_pct:
+            discount = (
+                config.planning_descent_linear_coefficient * descent_pct
+                + config.planning_descent_quadratic_coefficient * descent_pct ** 2
+            )
+        else:
+            discount = 0.0
+        multiplier = 1 - discount
+    return segment_distance_km * multiplier
+
+
 def load_track(path, simplify=True):
     with open(path, "r", encoding="utf-8") as handle:
         gpx = gpxpy.parse(handle)
@@ -94,8 +114,8 @@ def load_track(path, simplify=True):
     ).median()
     cumulative_distance = 0.0
     cumulative_effort = 0.0
-    profile = [{"distance": 0.0, "effort": 0.0}]
-    climb_factor = getattr(config, "planning_climb_km_per_100m", 1.0)
+    cumulative_ascent = 0.0
+    profile = [{"distance": 0.0, "effort": 0.0, "ascent": 0.0}]
     last_profile_distance = 0.0
     for index, (a, b) in enumerate(zip(exact_coordinates, exact_coordinates[1:]), 1):
         segment_distance = 2 * 6371.0088 * math.asin(math.sqrt(
@@ -103,12 +123,15 @@ def load_track(path, simplify=True):
             + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0]))
             * math.sin(math.radians(b[1] - a[1]) / 2) ** 2
         ))
-        ascent = max(0.0, float(elevations.iloc[index] - elevations.iloc[index - 1]))
+        delta_elevation = float(elevations.iloc[index] - elevations.iloc[index - 1])
+        ascent = max(0.0, delta_elevation)
         cumulative_distance += segment_distance
-        cumulative_effort += segment_distance + ascent / 100 * climb_factor
+        cumulative_effort += climb_descent_effort(delta_elevation, segment_distance)
+        cumulative_ascent += ascent
         if cumulative_distance - last_profile_distance >= 1 or index == len(points) - 1:
             profile.append({"distance": round(cumulative_distance, 2),
-                            "effort": round(cumulative_effort, 2)})
+                            "effort": round(cumulative_effort, 2),
+                            "ascent": round(cumulative_ascent, 1)})
             last_profile_distance = cumulative_distance
     coordinates = [(p.longitude, p.latitude) for p in points]
     if simplify:
@@ -288,7 +311,7 @@ def make_payload(forecasts, route, route_distance_km, route_profile):
             "route_profile": route_profile,
         "planning_daily_riding_hours": getattr(config, "planning_daily_riding_hours", 12),
         "planning_daily_moving_hours": getattr(config, "planning_daily_moving_hours", 9),
-            "planning_climb_km_per_100m": getattr(config, "planning_climb_km_per_100m", 1),
+            "planning_fatigue_speed_loss_kmh": getattr(config, "planning_fatigue_speed_loss_kmh", .5),
             "towns": visible_towns, "weather_towns": towns,
             "planner_towns": planner_towns, "frames": frames}
 
@@ -421,6 +444,13 @@ window.prepareShareUrl=()=>{{if(!planner.hidden)syncForecastUrl()}};
 function localDate(value){{return new Date(`${{value}}T12:00:00`)}}
 function isoDate(date){{const year=date.getFullYear(),month=String(date.getMonth()+1).padStart(2,'0'),day=String(date.getDate()).padStart(2,'0');return `${{year}}-${{month}}-${{day}}`}}
 function distanceAtEffort(target){{const profile=data.route_profile;if(target<=0)return 0;const index=profile.findIndex(point=>point.effort>=target);if(index<0)return data.route_distance_km;const b=profile[index],a=profile[Math.max(0,index-1)],ratio=(target-a.effort)/Math.max(.001,b.effort-a.effort);return a.distance+(b.distance-a.distance)*ratio}}
+function ascentAtDistance(distance){{const profile=data.route_profile;if(distance<=0)return 0;const index=profile.findIndex(point=>point.distance>=distance);if(index<0)return profile.at(-1).ascent||0;const b=profile[index],a=profile[Math.max(0,index-1)],ratio=(distance-a.distance)/Math.max(.001,b.distance-a.distance);return (a.ascent||0)+((b.ascent||0)-(a.ascent||0))*ratio}}
+function computeFatiguedDailyEfforts(totalEffort,duration,movingHours,fatigueSpeedLossKmh){{
+  if(duration<=0)return [];
+  const unadjustedAverageSpeed=totalEffort/Math.max(.1,movingHours)/duration,
+    firstDaySpeed=unadjustedAverageSpeed+fatigueSpeedLossKmh*(duration-1)/2;
+  return Array.from({{length:duration}},(_,index)=>Math.max(.1,firstDaySpeed-fatigueSpeedLossKmh*index)*movingHours);
+}}
 function nearestPlannerTown(distance){{return data.planner_towns.reduce((best,town)=>Math.abs(town.distance_km-distance)<Math.abs(best.distance_km-distance)?town:best)}}
 function endpointTown(role){{return data.planner_towns.find(town=>town.role.includes(role))||nearestPlannerTown(role==='depart'?0:data.route_distance_km)}}
 function noonPlannerTown(distance,morningTown,eveningTown,lastDay){{const upper=lastDay?data.route_distance_km:eveningTown.distance_km,distinct=data.planner_towns.filter(town=>town.name!==morningTown.name&&town.name!==eveningTown.name),candidates=distinct.filter(town=>town.distance_km>morningTown.distance_km+1&&town.distance_km<upper-1),pool=candidates.length?candidates:distinct;return pool.length?pool.reduce((best,town)=>Math.abs(town.distance_km-distance)<Math.abs(best.distance_km-distance)?town:best):nearestPlannerTown(distance)}}
@@ -428,9 +458,10 @@ function townForecast(town,date){{const weatherTown=data.weather_towns.find(cand
 function plannerCardAttrs(town,date,hour){{return `role="button" tabindex="0" data-town="${{encodeURIComponent(town.name)}}" data-date="${{date}}" data-hour="${{hour}}"`}}
 function weatherSourceLinks(town){{const links=[];if(town?.meteofrance_url)links.push(`<a class="meteofrance-link" href="${{town.meteofrance_url}}" target="_blank" rel="noopener">Météo-France</a>`);if(town?.wunderground_url)links.push(`<a class="meteofrance-link" href="${{town.wunderground_url}}" target="_blank" rel="noopener">WUnderground</a>`);if(town?.meteociel_url)links.push(`<a class="meteofrance-link" href="${{town.meteociel_url}}" target="_blank" rel="noopener">Meteociel</a>`);if(town?.lachainemeteo_url)links.push(`<a class="meteofrance-link" href="${{town.lachainemeteo_url}}" target="_blank" rel="noopener">La Chaîne Météo</a>`);return links.length?`<span class="weather-source-links">${{links.join('')}}</span>`:''}}
 function conditionCard(title,town,conditions,date,hour){{if(!conditions)return `<div class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town?.name??'—'}}</strong><span class="trip-unavailable">Indisponible</span>${{weatherSourceLinks(town)}}</div>`;const gust=conditions.gusts>conditions.wind?`<span class="trip-gust">${{conditions.gusts}} km/h</span>`:'';return `<div class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[conditions.weather]}}</b>${{conditions.temperature}}°</span><span class="trip-wind"><i class="trip-wind-arrow" style="transform:rotate(${{(conditions.wind_degrees+180)%360}}deg)">↑</i><span>${{conditions.wind}} km/h</span>${{gust}}</span>${{weatherSourceLinks(town)}}</div>`}}
-function renderPlanner(){{const duration=Math.max(1,Math.min(16,Number(tripDuration.value)||1)),start=localDate(tripStart.value),departureParts=(tripTime.value||'08:00').split(':').map(Number),departureHour=departureParts[0]+departureParts[1]/60,totalEffort=data.route_profile.at(-1).effort,dailyEffort=totalEffort/duration,rideHours=data.planning_daily_riding_hours,movingHours=data.planning_daily_moving_hours,arrivalClock=departureHour+rideHours,arrivalHour=Math.round(arrivalClock)%24,arrivalDayOffset=Math.floor(Math.round(arrivalClock)/24);localStorage.setItem(plannerKey,JSON.stringify({{start:tripStart.value,duration,time:tripTime.value}}));
-  const nightTowns=Array.from({{length:duration+1}},(_,index)=>index===0?endpointTown('depart'):index===duration?endpointTown('arrivee'):nearestPlannerTown(distanceAtEffort(dailyEffort*index)));
-  tripDays.innerHTML=Array.from({{length:duration}},(_,index)=>{{const date=new Date(start);date.setDate(start.getDate()+index);const dateKey=isoDate(date),eveningDate=new Date(date);eveningDate.setDate(date.getDate()+arrivalDayOffset);const eveningDateKey=isoDate(eveningDate),label=date.toLocaleDateString('fr-FR',{{weekday:'short',day:'numeric',month:'short'}}),startEffort=dailyEffort*index,endEffort=dailyEffort*(index+1),startDistance=distanceAtEffort(startEffort),endDistance=distanceAtEffort(endEffort),noonRatio=Math.max(0,Math.min(1,(12-departureHour)/Math.max(.1,rideHours))),noonDistance=distanceAtEffort(startEffort+dailyEffort*noonRatio),morningTown=nightTowns[index],eveningTown=nightTowns[index+1],noonTown=noonPlannerTown(noonDistance,morningTown,eveningTown,index===duration-1),morningForecast=townForecast(morningTown,dateKey),noonForecast=townForecast(noonTown,dateKey),eveningForecast=townForecast(eveningTown,eveningDateKey),distance=Math.round(endDistance-startDistance),gain=Math.max(0,Math.round((dailyEffort-(endDistance-startDistance))*100/Math.max(.01,data.planning_climb_km_per_100m))),speed=(endDistance-startDistance)/Math.max(.1,movingHours);
+function renderPlanner(){{const duration=Math.max(1,Math.min(16,Number(tripDuration.value)||1)),start=localDate(tripStart.value),departureParts=(tripTime.value||'08:00').split(':').map(Number),departureHour=departureParts[0]+departureParts[1]/60,totalEffort=data.route_profile.at(-1).effort,rideHours=data.planning_daily_riding_hours,movingHours=data.planning_daily_moving_hours,fatigueSpeedLossKmh=data.planning_fatigue_speed_loss_kmh||0,arrivalClock=departureHour+rideHours,arrivalHour=Math.round(arrivalClock)%24,arrivalDayOffset=Math.floor(Math.round(arrivalClock)/24);localStorage.setItem(plannerKey,JSON.stringify({{start:tripStart.value,duration,time:tripTime.value}}));
+  const dailyEfforts=computeFatiguedDailyEfforts(totalEffort,duration,movingHours,fatigueSpeedLossKmh),cumulativeEfforts=dailyEfforts.reduce((acc,value)=>{{acc.push((acc.at(-1)||0)+value);return acc}},[]),effortAtDay=index=>index===0?0:cumulativeEfforts[index-1];
+  const nightTowns=Array.from({{length:duration+1}},(_,index)=>index===0?endpointTown('depart'):index===duration?endpointTown('arrivee'):nearestPlannerTown(distanceAtEffort(effortAtDay(index))));
+  tripDays.innerHTML=Array.from({{length:duration}},(_,index)=>{{const date=new Date(start);date.setDate(start.getDate()+index);const dateKey=isoDate(date),eveningDate=new Date(date);eveningDate.setDate(date.getDate()+arrivalDayOffset);const eveningDateKey=isoDate(eveningDate),label=date.toLocaleDateString('fr-FR',{{weekday:'short',day:'numeric',month:'short'}}),startEffort=effortAtDay(index),endEffort=effortAtDay(index+1),dayEffort=endEffort-startEffort,startDistance=distanceAtEffort(startEffort),endDistance=distanceAtEffort(endEffort),noonRatio=Math.max(0,Math.min(1,(12-departureHour)/Math.max(.1,rideHours))),noonDistance=distanceAtEffort(startEffort+dayEffort*noonRatio),morningTown=nightTowns[index],eveningTown=nightTowns[index+1],noonTown=noonPlannerTown(noonDistance,morningTown,eveningTown,index===duration-1),morningForecast=townForecast(morningTown,dateKey),noonForecast=townForecast(noonTown,dateKey),eveningForecast=townForecast(eveningTown,eveningDateKey),distance=Math.round(endDistance-startDistance),gain=Math.round(ascentAtDistance(endDistance)-ascentAtDistance(startDistance)),speed=(endDistance-startDistance)/Math.max(.1,movingHours);
     return `<article class="trip-day"><div class="trip-day-head"><strong>${{label}}</strong><span>${{distance}} km · D+ ${{gain}} m · ${{speed.toFixed(1)}} km/h</span></div><div class="trip-metrics">${{conditionCard('Matin',morningTown,morningForecast?.hourly?.['6'],dateKey,6)}}${{conditionCard('Midi',noonTown,noonForecast?.noon,dateKey,12)}}${{conditionCard('Soir',eveningTown,eveningForecast?.hourly?.[String(arrivalHour)],eveningDateKey,arrivalHour)}}</div></article>`}}).join('')}}
 function openPlanner(updateUrl=true){{stop();details.hidden=true;selectedTownId=null;document.querySelector('main').classList.remove('details-open');planner.hidden=false;document.querySelector('main').classList.add('planner-open');renderPlanner();if(updateUrl){{const path=forecastPath(false);history.pushState({{forecast:true}},'',path);rememberView(path)}}}}
 function closePlanner(updateUrl=true){{planner.hidden=true;document.querySelector('main').classList.remove('planner-open');if(updateUrl)history.pushState({{forecast:false}},'',routeBasePath);rememberView(routeBasePath);setTimeout(()=>map.invalidateSize(),0)}}
@@ -601,11 +632,22 @@ def main():
         == os.path.abspath(config.production_gpx_path)
     )
     if source_is_public and os.path.exists(config.production_profile_path):
-        route, _, _ = load_track(config.production_gpx_path, simplify=False)
+        route, public_distance_km, public_profile = load_track(
+            config.production_gpx_path, simplify=False
+        )
         with open(config.production_profile_path, "r", encoding="utf-8") as handle:
             stored_profile = json.load(handle)
-        route_distance_km = stored_profile["distance_km"]
-        route_profile = stored_profile["profile"]
+        # Un profil créé avant l'introduction du cumul D+ reste lisible : il
+        # est simplement recalculé depuis le GPX public au lieu de produire
+        # des gains quotidiens nuls.
+        if stored_profile.get("profile") and all(
+            "ascent" in point for point in stored_profile["profile"]
+        ):
+            route_distance_km = stored_profile["distance_km"]
+            route_profile = stored_profile["profile"]
+        else:
+            route_distance_km = public_distance_km
+            route_profile = public_profile
     elif not source_is_public:
         # La carte en ligne affiche exactement le GPX public kilométrique ; le
         # profil d'effort reste calculé sur l'original pour préserver le D+.

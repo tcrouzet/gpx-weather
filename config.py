@@ -58,10 +58,13 @@ trip_days = 8
 # comme une fraction de la longueur totale de la trace.
 city_spacing_divisor = 18
 
-# Modèle d'effort du planning : sur une portion de 10 km comportant 100 m D+,
-# la vitesse est réduite de 40 % (temps multiplié par 1 / 0,6). Cela revient à
-# ajouter environ 6,67 km plats par tranche de 100 m de montée.
-planning_climb_km_per_100m = 6.6667
+# Modèle d'effort non linéaire selon la pente de chaque segment.
+planning_climb_coefficient = 0.003
+planning_climb_exponent = 3.0
+planning_descent_linear_coefficient = 0.07
+planning_descent_quadratic_coefficient = -0.002
+planning_descent_max_grade_pct = 10.0
+planning_fatigue_speed_loss_kmh = 0.5
 planning_daily_riding_hours = 12
 # Temps de roulage effectif dans la plage quotidienne de 12 heures.
 # Il ne modifie pas le découpage, seulement la vitesse affichée.

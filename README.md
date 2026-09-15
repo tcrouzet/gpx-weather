@@ -116,19 +116,20 @@ replie sur lui-même.
 
 ### Découpage quotidien du voyage
 
-Le découpage ne partage pas simplement les kilomètres. Un profil d'effort est
-calculé à partir du GPX après lissage médian des altitudes :
+Le découpage ne partage pas simplement les kilomètres. Après lissage médian des
+altitudes, chaque segment est pondéré selon sa pente. En montée, le
+multiplicateur est :
 
 ```text
-effort équivalent (km) = distance (km) + D+ / 100 × 6,6667
+1 + 0,003 × pente_en_%³
 ```
 
-Ainsi, une portion de 10 km comportant 100 m de D+ compte comme environ
-16,67 km plats. Cela correspond au réglage demandé : sur cette portion, la
-vitesse effective est réduite d'environ 40 %. L'effort total est partagé à parts
-égales entre les jours, puis chaque limite d'effort est reconvertie en position
-kilométrique sur la trace. Une journée montagneuse est donc plus courte qu'une
-journée plate.
+En descente jusqu'à 10 %, un rabais quadratique réduit l'effort ; au-delà de
+10 %, aucun gain supplémentaire n'est accordé. Cela évite de considérer les
+descentes très raides comme artificiellement rapides. L'effort total est ensuite
+réparti entre les jours avec une perte de vitesse de 0,5 km/h par jour : les
+premiers jours sont un peu plus longs et les derniers un peu plus courts. Chaque
+limite d'effort est enfin reconvertie en position kilométrique sur la trace.
 
 Les cyclistes disposent d'une plage quotidienne de 12 heures, mais le calcul de
 la vitesse affichée utilise 9 heures de roulage effectif afin de réserver un
@@ -149,7 +150,9 @@ tous les 100 km et chaque étape utilise les prévisions du point disponible le
 plus proche à vol d'oiseau.
 
 Les principaux réglages se trouvent dans `config.py` : `trip_days`,
-`city_spacing_divisor`, `planning_climb_km_per_100m`,
+`city_spacing_divisor`, `planning_climb_coefficient`,
+`planning_climb_exponent`, `planning_descent_linear_coefficient`,
+`planning_descent_quadratic_coefficient`, `planning_fatigue_speed_loss_kmh`,
 `planning_daily_riding_hours`, `planning_daily_moving_hours`,
 `planning_city_interval_km` et `planning_weather_interval_km`.
 
