@@ -41,7 +41,7 @@ jobs:
       - name: Préparer les pages des parcours
         run: |
           mkdir -p _site
-          cp _output/index.html _site/index.html
+          cp _output/index.html _output/404.html _site/
           cp webapp/manifest.webmanifest webapp/icon-192.png webapp/icon-512.png webapp/apple-touch-icon.png _site/
           cp _output/sw.js _site/sw.js
           for page in _output/*/index.html; do
