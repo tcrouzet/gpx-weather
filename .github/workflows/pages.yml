@@ -7,7 +7,7 @@ on:
     # Toutes les 3 heures environ (UTC). Comme GitHub retarde parfois les
     # crons planifiés, on ne filtre plus par heure locale au runtime : le
     # build s'exécute systématiquement à chaque déclenchement.
-    - cron: "0 4,7,10,14,20 * * *"
+    - cron: "0 4,8,14,20 * * *"
   workflow_dispatch:
 
 permissions:
@@ -42,6 +42,7 @@ jobs:
         run: |
           mkdir -p _site
           cp _output/index.html _site/index.html
+          cp _output/404.html _site/404.html
           cp webapp/manifest.webmanifest webapp/sw.js webapp/icon-192.png webapp/icon-512.png webapp/apple-touch-icon.png _site/
           for page in _output/*/index.html; do
             slug="$(basename "$(dirname "$page")")"

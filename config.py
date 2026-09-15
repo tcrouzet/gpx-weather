@@ -121,8 +121,8 @@ def configure_route(path):
     production_profile_path = os.path.join(
         public_gpx_dir, f"{route_slug}.profile.json"
     )
-    # v2 inclut également les villages, indispensables au planning horaire.
-    all_towns_csv_path = os.path.join(outdir, "all_places_v2.csv")
+    # v3 conserve aussi les identifiants Wikidata/GeoNames des villes.
+    all_towns_csv_path = os.path.join(outdir, "all_places_v3.csv")
     github_pages_url = f"{github_pages_base_url}/{route_slug}/"
 
 

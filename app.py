@@ -7,10 +7,12 @@ carto.py pour produire la visualisation Leaflet interactive.
 """
 
 import os
+import csv
 import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import config
 from gpx_export import export_simplified_gpx
@@ -93,9 +95,24 @@ li{{margin:.55rem 0;line-height:1.4}}</style></head><body>
 <li>Le bouton de lecture sur la carte fait défiler automatiquement les prévisions.</li>
 <li>Le sélecteur en haut à droite de la carte permet de changer le fond de carte.</li></ul></main>
 <script>{NAVIGATION_SCRIPT}
+if(new URLSearchParams(location.search).get('home')!=='1'){{const last=localStorage.getItem('gpx-weather-last-view');if(last&&last!==location.pathname)location.replace(last)}}
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script></body></html>'''
     with open(os.path.join(config.output_root, "index.html"), "w", encoding="utf-8") as handle:
         handle.write(html)
+
+    # GitHub Pages renvoie ce document pour les URL dynamiques de planning.
+    # Il recharge la page de la trace avec un paramètre transitoire ; carto.py
+    # restaure ensuite l'URL /forecast/... dans la barre d'adresse.
+    base_path = urlparse(config.github_pages_base_url).path.rstrip("/") + "/"
+    slugs = json.dumps([slug for slug, _ in routes], ensure_ascii=False)
+    fallback = f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>GPX Weather</title></head>
+<body><p>Chargement…</p><script>
+const base={json.dumps(base_path)},slugs={slugs},relative=location.pathname.startsWith(base)?location.pathname.slice(base.length):'',parts=relative.split('/').filter(Boolean),slug=parts[0];
+if(slugs.includes(slug)&&parts[1]==='forecast'){{const token=parts[2]||'1';location.replace(`${{base}}${{slug}}/?forecast=${{encodeURIComponent(token)}}`)}}else location.replace(base+'?home=1');
+</script></body></html>'''
+    with open(os.path.join(config.output_root, "404.html"), "w", encoding="utf-8") as handle:
+        handle.write(fallback)
 
 
 def process_route(gpx_path):
@@ -108,7 +125,11 @@ def process_route(gpx_path):
         name=config.project,
     )
 
-    if not os.path.exists(config.towns_csv_path):
+    towns_schema_current = False
+    if os.path.exists(config.towns_csv_path):
+        with open(config.towns_csv_path, encoding="utf-8", newline="") as handle:
+            towns_schema_current = "wunderground_url" in (next(csv.reader(handle), []))
+    if not towns_schema_current:
         run_step("town", "Étape 1 : town")
     else:
         print(f"Skipping town.py : {config.towns_csv_path} existe déjà")

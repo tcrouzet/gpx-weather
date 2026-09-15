@@ -4,6 +4,8 @@
 import json
 import math
 import os
+import re
+import unicodedata
 from datetime import datetime
 from html import escape
 from zoneinfo import ZoneInfo
@@ -42,6 +44,33 @@ def wind_direction_label(value):
         return "indéterminée"
     labels = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
     return labels[int((float(value) + 22.5) // 45) % 8]
+
+
+def meteofrance_url(name, postcode=None, geoname_id=None):
+    # Météo-France ne publie pas toutes les petites communes présentes dans
+    # GeoNames et emploie parfois un exonyme français pour le slug.  Ces
+    # exceptions renvoient vers la localité Météo-France disponible la plus
+    # proche, sans changer le nom affiché ni le point météo du parcours.
+    world_overrides = {
+        "3112700": ("cadaques", "3127117"),       # la Selva de Mar
+        "3116552": ("espolla", "3122824"),        # Sant Climent Sescebes
+        "3121456": ("gerone", "3121456"),         # Girona
+    }
+    slug = unicodedata.normalize("NFKD", str(name)).encode(
+        "ascii", "ignore"
+    ).decode().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+    if postcode is not None and not pd.isna(postcode):
+        postal = str(postcode).split(".")[0].strip()
+        if re.fullmatch(r"\d{5}", postal):
+            return f"https://meteofrance.com/previsions-meteo-france/{slug}/{postal}"
+    if geoname_id is not None and not pd.isna(geoname_id):
+        identifier = str(geoname_id).split(".")[0].strip()
+        if identifier.isdigit():
+            if identifier in world_overrides:
+                slug, identifier = world_overrides[identifier]
+            return f"https://meteofrance.com/meteo-monde/{slug}/{identifier}"
+    return None
 
 
 def load_track(path, simplify=True):
@@ -160,7 +189,10 @@ def make_payload(forecasts, route, route_distance_km, route_profile):
                     "temperature": round(float(value["temperature"])),
                     "weather": weather_category(value.get("weather_code")),
                     "wind": round(float(value.get("wind_speed", 0))),
+                    "gusts": round(float(value.get("wind_gusts", 0))),
                     "wind_direction": wind_direction_label(value.get("wind_direction")),
+                    "wind_degrees": (round(float(value.get("wind_direction")))
+                                     if pd.notna(value.get("wind_direction")) else 0),
                     "rain_probability": (round(float(rain_probability))
                                          if pd.notna(rain_probability) else None),
                     "precipitation": round(float(value.get("precipitation", 0)), 1),
@@ -219,7 +251,10 @@ def make_payload(forecasts, route, route_distance_km, route_profile):
             "values": values,
         })
     visible_towns = [town for town in towns if town["role"] not in ("planning", "meteo")]
-    places = pd.read_csv(config.towns_csv_path).sort_values("distance_km")
+    places = pd.read_csv(
+        config.towns_csv_path,
+        dtype={"postcode": "string", "geoname_id": "string"},
+    ).sort_values("distance_km")
     planner_towns = []
     for _, place in places.iterrows():
         weather_town = min(
@@ -235,6 +270,13 @@ def make_payload(forecasts, route, route_distance_km, route_profile):
             "name": place["name"], "lat": float(place.lat), "lon": float(place.lon),
             "distance_km": float(place.distance_km), "role": place["role"],
             "weather_town_id": weather_town["id"],
+            "meteofrance_url": meteofrance_url(
+                place["name"], place.get("postcode"), place.get("geoname_id")
+            ),
+            "wunderground_url": (
+                None if pd.isna(place.get("wunderground_url"))
+                else str(place.get("wunderground_url"))
+            ),
         })
     return {"route": route, "route_distance_km": round(route_distance_km, 1),
             "route_profile": route_profile,
@@ -265,7 +307,7 @@ def build_html(payload):
     routes = [(config.route_slug_for(path), config.route_title_for(path))
               for path in config.list_gpx_files()]
     navigation_html = render_navigation(
-        config.project, routes, "../", "../", settings=True, title_href="./"
+        config.project, routes, "../?home=1", "../", settings=True, title_href="./"
     )
     planner_header = render_panel_header(
         "planner-close", "Carte", "Prévisions du voyage"
@@ -274,7 +316,7 @@ def build_html(payload):
         "close-details", "Fermer", title_id="details-title"
     )
     speed = max(100, int(getattr(config, "speed", .5) * 1000))
-    return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
+    return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8"><base href="./"><script>if(location.pathname.includes('/forecast'))document.querySelector('base').href=location.pathname.split('/forecast')[0]+'/'</script>
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
 <meta name="description" content="Prévisions météo interactives du parcours {title}">
 <meta property="og:type" content="website"><meta property="og:locale" content="fr_FR">
@@ -325,14 +367,13 @@ display:grid;grid-template-columns:1fr;grid-template-rows:28px 14px 20px;place-i
 .trip-planner{{flex:1;min-height:0;overflow-y:auto;background:#fff;color:#17234d;padding:14px}}
 .trip-planner[hidden]{{display:none}} main.planner-open #map,main.planner-open .controls,main.planner-open .details{{display:none}}
 .planner-shell{{width:min(760px,100%);margin:auto}}.planner-shell>.panel-head{{margin-bottom:14px}}
-.planner-form{{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:10px;margin-bottom:14px}}.planner-form label{{font-size:12px;font-weight:750}}
-.planner-form input{{display:block;width:100%;margin-top:4px;border:1px solid #cbd1df;border-radius:8px;background:#fff;padding:9px;font:inherit;color:#17234d}}
+.planner-form{{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:10px;margin-bottom:14px}}.planner-form label{{min-width:0;font-size:12px;font-weight:750}}
+.planner-form input{{display:block;width:100%;height:42px;min-height:42px;margin-top:4px;border:1px solid #cbd1df;border-radius:8px;background:#fff;padding:7px;font:inherit;line-height:26px;color:#17234d}}
 .trip-days{{display:grid;gap:0}}.trip-day{{background:#fff;padding:9px}}.trip-day-head{{display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}}.trip-day-head span{{font-size:11px;color:#68708c}}
-.trip-metrics{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}}.trip-stop{{position:relative;display:block;width:100%;min-width:0;border:0;background:#f1f3f8;color:inherit;font:inherit;border-radius:8px;padding:7px;text-align:center}}button.trip-stop{{cursor:pointer;box-shadow:inset 0 0 0 1px #cfd5e2}}button.trip-stop::after{{content:'›';position:absolute;right:6px;top:50%;translate:0 -50%;font-size:20px;font-weight:900;color:#315bb5}}button.trip-stop:hover,button.trip-stop:focus-visible{{background:#e2e6ef;outline:2px solid #315bb5;outline-offset:1px}}button.trip-stop:active{{background:#d8deea}}.trip-stop strong{{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px}}.trip-stop-value{{display:block;font-size:18px;font-weight:850;margin:3px 0}}.trip-weather-icon{{font-size:22px;vertical-align:middle;margin-right:3px}}.trip-stop small{{display:block;font-size:9px;color:#68708c;line-height:1.25}}
+.trip-metrics{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}}.trip-stop{{position:relative;display:flex;width:100%;min-width:0;min-height:104px;border:0;background:#f1f3f8;color:inherit;font:inherit;border-radius:8px;padding:7px;text-align:center;flex-direction:column;align-items:stretch;cursor:pointer;box-shadow:inset 0 0 0 1px #cfd5e2}}.trip-stop:hover,.trip-stop:focus-visible{{background:#e2e6ef;outline:2px solid #315bb5;outline-offset:1px}}.trip-stop:active{{background:#d8deea}}.trip-stop strong{{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.trip-stop-value{{display:block;font-size:18px;font-weight:850;margin:3px 0 0}}.trip-weather-icon{{font-size:24px;vertical-align:middle;margin-right:3px}}.trip-wind{{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:0;font-size:10px;font-weight:750;color:#4c5875;white-space:nowrap}}.trip-wind-arrow{{display:inline-block;font-size:18px;line-height:1}}.trip-gust{{display:inline-block;padding:3px 5px;border-radius:5px;background:#e53935;color:#fff;font-size:9px;font-weight:850}}.weather-source-links{{display:flex;justify-content:center;gap:7px;margin-top:auto;padding-top:4px}}.meteofrance-link{{color:#315bb5;font-size:9px;font-weight:750;text-decoration:none}}.meteofrance-link:hover{{text-decoration:underline}}
 .trip-unavailable{{color:#8b90a0;font-size:13px}}
-.planner-focus{{width:24px!important;height:24px!important;border:4px solid #fff;border-radius:50%;background:#f6a800;box-shadow:0 2px 8px #0008}}
 @media(max-width:600px){{.details-shell{{padding:7px 7px}}.panel-title{{font-size:18px}}.metric-grid{{grid-template-columns:repeat(2,1fr);gap:5px}}
-.metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}.trip-planner{{padding:9px 7px}}.planner-form{{grid-template-columns:1.3fr .7fr .8fr;gap:6px}}.planner-form input{{padding:8px 5px}}.trip-day{{padding:7px}}.trip-metrics{{gap:4px}}.trip-stop{{padding:6px 3px}}.trip-stop-value{{font-size:16px}}}}
+.metric{{min-height:50px;padding:5px 7px}}.metric-value{{font-size:14px}}.trip-planner{{padding:9px 7px}}.planner-form{{grid-template-columns:1fr 1fr;gap:7px}}.planner-form label:first-child{{grid-column:1/-1}}.planner-form input{{height:42px;min-height:42px;padding:7px}}.trip-day{{padding:7px}}.trip-metrics{{gap:4px}}.trip-stop{{padding:6px 3px;min-height:100px}}.trip-stop-value{{font-size:16px}}}}
 @media(max-height:680px){{.daily-strip{{flex-basis:62px}}.daily-choice{{grid-template-rows:24px 12px 18px}}.daily-choice .daily-icon{{font-size:18px}}
 .metric{{min-height:45px}}.detail-source{{margin-top:3px}}}}
 .controls{{height:86px;flex:0 0 86px;background:#18295c;color:#fff;padding:2px 0}}
@@ -364,6 +405,13 @@ weatherNames={{clear:'Ciel dégagé',partly_cloudy:'Éclaircies',cloudy:'Nuageux
 {NAVIGATION_SCRIPT}
 const planner=document.querySelector('#trip-planner'),tripStart=document.querySelector('#trip-start'),tripDuration=document.querySelector('#trip-duration'),tripTime=document.querySelector('#trip-time'),tripDays=document.querySelector('#trip-days');
 const plannerKey='gpx-weather-trip-{escape(config.route_slug)}';
+const lastViewKey='gpx-weather-last-view',routeBasePath=new URL('.',document.baseURI).pathname;
+function forecastRoute(){{const match=location.pathname.match(/\\/forecast(?:\\/(\\d{{8}})-(\\d{{1,2}})-(\\d{{1,2}}))?\\/?$/),fallback=new URLSearchParams(location.search).get('forecast');if(match)return {{active:true,date:match[1],hour:match[2],duration:match[3]}};if(fallback){{const value=fallback.match(/^(\\d{{8}})-(\\d{{1,2}})-(\\d{{1,2}})$/);return {{active:true,date:value?.[1],hour:value?.[2],duration:value?.[3]}}}}return {{active:false}}}}
+function compactDate(value){{return value.replaceAll('-','')}}
+function forecastPath(detailed=false){{return `${{routeBasePath}}forecast/${{detailed?`${{compactDate(tripStart.value)}}-${{Number((tripTime.value||'8:00').split(':')[0])}}-${{Math.max(1,Math.min(16,Number(tripDuration.value)||1))}}`:''}}`}}
+function rememberView(path){{localStorage.setItem(lastViewKey,path)}}
+function syncForecastUrl(){{const path=forecastPath(true);history.replaceState({{forecast:true}},'',path);rememberView(path)}}
+window.prepareShareUrl=()=>{{if(!planner.hidden)syncForecastUrl()}};
 function localDate(value){{return new Date(`${{value}}T12:00:00`)}}
 function isoDate(date){{const year=date.getFullYear(),month=String(date.getMonth()+1).padStart(2,'0'),day=String(date.getDate()).padStart(2,'0');return `${{year}}-${{month}}-${{day}}`}}
 function distanceAtEffort(target){{const profile=data.route_profile;if(target<=0)return 0;const index=profile.findIndex(point=>point.effort>=target);if(index<0)return data.route_distance_km;const b=profile[index],a=profile[Math.max(0,index-1)],ratio=(target-a.effort)/Math.max(.001,b.effort-a.effort);return a.distance+(b.distance-a.distance)*ratio}}
@@ -371,18 +419,19 @@ function nearestPlannerTown(distance){{return data.planner_towns.reduce((best,to
 function endpointTown(role){{return data.planner_towns.find(town=>town.role.includes(role))||nearestPlannerTown(role==='depart'?0:data.route_distance_km)}}
 function noonPlannerTown(distance,morningTown,eveningTown,lastDay){{const upper=lastDay?data.route_distance_km:eveningTown.distance_km,distinct=data.planner_towns.filter(town=>town.name!==morningTown.name&&town.name!==eveningTown.name),candidates=distinct.filter(town=>town.distance_km>morningTown.distance_km+1&&town.distance_km<upper-1),pool=candidates.length?candidates:distinct;return pool.length?pool.reduce((best,town)=>Math.abs(town.distance_km-distance)<Math.abs(best.distance_km-distance)?town:best):nearestPlannerTown(distance)}}
 function townForecast(town,date){{const weatherTown=data.weather_towns.find(candidate=>candidate.id===town?.weather_town_id);return weatherTown?.daily.find(row=>row.date===date)}}
-function plannerCardAttrs(town,date,hour){{return `type="button" data-town="${{encodeURIComponent(town.name)}}" data-date="${{date}}" data-hour="${{hour}}"`}}
-function conditionCard(title,town,conditions,date,hour){{if(!conditions)return `<button class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town?.name??'—'}}</strong><span class="trip-unavailable">Indisponible</span></button>`;const rain=conditions.rain_probability===null?'—':`${{conditions.rain_probability}} %`;return `<button class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[conditions.weather]}}</b>${{conditions.temperature}}°</span><small>Vent ${{conditions.wind}} km/h · ${{conditions.wind_direction}}</small><small>Pluie ${{rain}} · ${{conditions.precipitation}} mm</small></button>`}}
+function plannerCardAttrs(town,date,hour){{return `role="button" tabindex="0" data-town="${{encodeURIComponent(town.name)}}" data-date="${{date}}" data-hour="${{hour}}"`}}
+function weatherSourceLinks(town){{const links=[];if(town?.meteofrance_url)links.push(`<a class="meteofrance-link" href="${{town.meteofrance_url}}" target="_blank" rel="noopener">Météo-France</a>`);if(town?.wunderground_url)links.push(`<a class="meteofrance-link" href="${{town.wunderground_url}}" target="_blank" rel="noopener">WUnderground</a>`);return links.length?`<span class="weather-source-links">${{links.join('')}}</span>`:''}}
+function conditionCard(title,town,conditions,date,hour){{if(!conditions)return `<div class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town?.name??'—'}}</strong><span class="trip-unavailable">Indisponible</span>${{weatherSourceLinks(town)}}</div>`;const gust=conditions.gusts>conditions.wind?`<span class="trip-gust">${{conditions.gusts}} km/h</span>`:'';return `<div class="trip-stop" ${{plannerCardAttrs(town,date,hour)}}><strong>${{title}} · ${{town.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[conditions.weather]}}</b>${{conditions.temperature}}°</span><span class="trip-wind"><i class="trip-wind-arrow" style="transform:rotate(${{(conditions.wind_degrees+180)%360}}deg)">↑</i><span>${{conditions.wind}} km/h</span>${{gust}}</span>${{weatherSourceLinks(town)}}</div>`}}
 function renderPlanner(){{const duration=Math.max(1,Math.min(16,Number(tripDuration.value)||1)),start=localDate(tripStart.value),departureParts=(tripTime.value||'08:00').split(':').map(Number),departureHour=departureParts[0]+departureParts[1]/60,totalEffort=data.route_profile.at(-1).effort,dailyEffort=totalEffort/duration,rideHours=data.planning_daily_riding_hours,movingHours=data.planning_daily_moving_hours,arrivalClock=departureHour+rideHours,arrivalHour=Math.round(arrivalClock)%24,arrivalDayOffset=Math.floor(Math.round(arrivalClock)/24);localStorage.setItem(plannerKey,JSON.stringify({{start:tripStart.value,duration,time:tripTime.value}}));
   const nightTowns=Array.from({{length:duration+1}},(_,index)=>index===0?endpointTown('depart'):index===duration?endpointTown('arrivee'):nearestPlannerTown(distanceAtEffort(dailyEffort*index)));
   tripDays.innerHTML=Array.from({{length:duration}},(_,index)=>{{const date=new Date(start);date.setDate(start.getDate()+index);const dateKey=isoDate(date),eveningDate=new Date(date);eveningDate.setDate(date.getDate()+arrivalDayOffset);const eveningDateKey=isoDate(eveningDate),label=date.toLocaleDateString('fr-FR',{{weekday:'short',day:'numeric',month:'short'}}),startEffort=dailyEffort*index,endEffort=dailyEffort*(index+1),startDistance=distanceAtEffort(startEffort),endDistance=distanceAtEffort(endEffort),noonRatio=Math.max(0,Math.min(1,(12-departureHour)/Math.max(.1,rideHours))),noonDistance=distanceAtEffort(startEffort+dailyEffort*noonRatio),morningTown=nightTowns[index],eveningTown=nightTowns[index+1],noonTown=noonPlannerTown(noonDistance,morningTown,eveningTown,index===duration-1),morningForecast=townForecast(morningTown,dateKey),noonForecast=townForecast(noonTown,dateKey),eveningForecast=townForecast(eveningTown,eveningDateKey),distance=Math.round(endDistance-startDistance),gain=Math.max(0,Math.round((dailyEffort-(endDistance-startDistance))*100/Math.max(.01,data.planning_climb_km_per_100m))),speed=(endDistance-startDistance)/Math.max(.1,movingHours);
-    const morning=morningForecast?`<button class="trip-stop" ${{plannerCardAttrs(morningTown,dateKey,6)}}><strong>Matin · ${{morningTown.name}}</strong><span class="trip-stop-value"><b class="trip-weather-icon">${{icons[morningForecast.weather]}}</b>${{morningForecast.temperature_min}}°</span><small>Température minimale</small></button>`:`<button class="trip-stop" ${{plannerCardAttrs(morningTown,dateKey,6)}}><strong>Matin · ${{morningTown.name}}</strong><span class="trip-unavailable">Indisponible</span></button>`;
-    return `<article class="trip-day"><div class="trip-day-head"><strong>${{label}}</strong><span>${{distance}} km · D+ ${{gain}} m · ${{speed.toFixed(1)}} km/h</span></div><div class="trip-metrics">${{morning}}${{conditionCard('Midi',noonTown,noonForecast?.noon,dateKey,12)}}${{conditionCard('Soir',eveningTown,eveningForecast?.hourly?.[String(arrivalHour)],eveningDateKey,arrivalHour)}}</div></article>`}}).join('')}}
-function openPlanner(){{stop();details.hidden=true;selectedTownId=null;document.querySelector('main').classList.remove('details-open');planner.hidden=false;document.querySelector('main').classList.add('planner-open');renderPlanner()}}
-function closePlanner(){{planner.hidden=true;document.querySelector('main').classList.remove('planner-open');setTimeout(()=>map.invalidateSize(),0)}}
+    return `<article class="trip-day"><div class="trip-day-head"><strong>${{label}}</strong><span>${{distance}} km · D+ ${{gain}} m · ${{speed.toFixed(1)}} km/h</span></div><div class="trip-metrics">${{conditionCard('Matin',morningTown,morningForecast?.hourly?.['6'],dateKey,6)}}${{conditionCard('Midi',noonTown,noonForecast?.noon,dateKey,12)}}${{conditionCard('Soir',eveningTown,eveningForecast?.hourly?.[String(arrivalHour)],eveningDateKey,arrivalHour)}}</div></article>`}}).join('')}}
+function openPlanner(updateUrl=true){{stop();details.hidden=true;selectedTownId=null;document.querySelector('main').classList.remove('details-open');planner.hidden=false;document.querySelector('main').classList.add('planner-open');renderPlanner();if(updateUrl){{const path=forecastPath(false);history.pushState({{forecast:true}},'',path);rememberView(path)}}}}
+function closePlanner(updateUrl=true){{planner.hidden=true;document.querySelector('main').classList.remove('planner-open');if(updateUrl)history.pushState({{forecast:false}},'',routeBasePath);rememberView(routeBasePath);setTimeout(()=>map.invalidateSize(),0)}}
 const savedTrip=(()=>{{try{{return JSON.parse(localStorage.getItem(plannerKey))||{{}}}}catch{{return {{}}}}}})(),availableDates=data.towns.flatMap(town=>town.daily.map(row=>row.date)).sort();
 tripStart.min=availableDates[0]||'';tripStart.removeAttribute('max');tripStart.value=savedTrip.start||data.frames[0]?.day||availableDates[0]||isoDate(new Date());tripDuration.value=savedTrip.duration||{int(config.trip_days)};tripTime.value=savedTrip.time||'08:00';
-tripStart.onchange=renderPlanner;tripDuration.oninput=renderPlanner;tripTime.oninput=renderPlanner;document.querySelector('#settings-button').onclick=openPlanner;document.querySelector('#planner-close').onclick=closePlanner;
+const initialForecast=forecastRoute();if(initialForecast.date)tripStart.value=`${{initialForecast.date.slice(0,4)}}-${{initialForecast.date.slice(4,6)}}-${{initialForecast.date.slice(6,8)}}`;if(initialForecast.hour)tripTime.value=`${{String(initialForecast.hour).padStart(2,'0')}}:00`;if(initialForecast.duration)tripDuration.value=Math.max(1,Math.min(16,Number(initialForecast.duration)||1));
+tripStart.onchange=()=>{{renderPlanner();syncForecastUrl()}};tripDuration.oninput=()=>{{renderPlanner();syncForecastUrl()}};tripTime.oninput=()=>{{renderPlanner();syncForecastUrl()}};document.querySelector('#settings-button').onclick=()=>openPlanner(true);document.querySelector('#planner-close').onclick=()=>closePlanner(true);
 const map=L.map('map',{{zoomControl:true}});
 const osmAttribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const osm=L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',{{maxZoom:19,attribution:osmAttribution}}).addTo(map);
@@ -409,10 +458,10 @@ drawRouteArrows();
 const markers={{}}; for(const town of data.towns){{const marker=L.marker([town.lat,town.lon],{{icon:L.divIcon({{
 className:'meteo-marker',iconSize:[1,1],iconAnchor:[0,0],html:
 `<span class="temperature">–</span><span class="weather"></span>`}})}}).addTo(map);
-marker.on('click',()=>showDetails(town.id));markers[town.id]=marker;}}
-const townById=Object.fromEntries(data.towns.map(t=>[t.id,t]));
+marker.on('click',()=>{{selectedDetailName=null;showDetails(town.id)}});markers[town.id]=marker;}}
+const townById=Object.fromEntries(data.weather_towns.map(t=>[t.id,t]));
 const days=document.querySelector('#days'),hours=document.querySelector('#hours'),details=document.querySelector('#details');
-let currentIndex=0,selectedTownId=null,selectedDetailDate=null,mapPlay=null,plannerFocusMarker=null;
+let currentIndex=0,selectedTownId=null,selectedDetailDate=null,selectedDetailName=null,mapPlay=null,plannerFocusMarker=null,plannerFocusTown=null;
 const PlayControl=L.Control.extend({{onAdd(){{mapPlay=L.DomUtil.create('button','map-play');mapPlay.type='button';mapPlay.textContent='▶';
   mapPlay.title='Lire automatiquement les prévisions';mapPlay.setAttribute('aria-label',mapPlay.title);L.DomEvent.disableClickPropagation(mapPlay);L.DomEvent.on(mapPlay,'click',toggle);return mapPlay}}}});
 new PlayControl({{position:'bottomright'}}).addTo(map);
@@ -448,17 +497,17 @@ function dailyChart(town,selectedIndex){{const rows=town.daily,columnWidth=40,wi
     <rect x="${{columnLeft+dataBarWidth}}" y="${{barBase-rainHeight}}" width="${{dataBarWidth}}" height="${{rainHeight}}" fill="#4da3ff"/>
     <text x="${{columnLeft+dataBarWidth/2}}" y="${{barBase-windHeight-5}}" text-anchor="middle" font-size="9" fill="#389b31">${{row.wind}}</text>
     <text x="${{columnLeft+dataBarWidth*1.5}}" y="${{barBase-rainHeight-5}}" text-anchor="middle" font-size="9" fill="#287cc9">${{row.precipitation}}</text>
-    <text x="${{px}}" y="${{barBase+16}}" text-anchor="middle" font-size="17" fill="#17234d" transform="rotate(${{row.wind_degrees}} ${{px}} ${{barBase+11}})">↑</text>
+    <text x="${{px}}" y="${{barBase+16}}" text-anchor="middle" font-size="17" fill="#17234d" transform="rotate(${{(row.wind_degrees+180)%360}} ${{px}} ${{barBase+11}})">↑</text>
     <text x="${{px}}" y="${{height-7}}" text-anchor="middle" font-size="10" fill="#70768c">${{row.weekday}} ${{row.day}}</text>`}}).join('');
   const labels=rows.map((row,index)=>`<text x="${{x(index)}}" y="${{yTemp(row.temperature_max)-7}}" text-anchor="middle" font-size="10" fill="#ef4444">${{row.temperature_max}}</text>
   <text x="${{x(index)}}" y="${{yTemp(row.temperature_min)+14}}" text-anchor="middle" font-size="10" fill="#3182ce">${{row.temperature_min}}</text>`).join('');
   return `<div class="forecast-chart"><svg viewBox="0 0 ${{width}} ${{height}}" preserveAspectRatio="none" role="img">${{columns}}
   <polyline points="${{maxPoints}}" fill="none" stroke="#ef4444" stroke-width="4" stroke-linejoin="round"/> <polyline points="${{minPoints}}" fill="none" stroke="#3182ce" stroke-width="4" stroke-linejoin="round"/>
   ${{labels}}</svg></div>`}}
-function showDetails(id,date=null){{stop();selectedTownId=id;const town=townById[id];if(!town?.daily.length)return;
+function showDetails(id,date=null,title=null){{stop();selectedTownId=id;if(title)selectedDetailName=title;const town=townById[id];if(!town?.daily.length)return;
   selectedDetailDate=date||selectedDetailDate||data.frames[currentIndex].day;let selectedIndex=town.daily.findIndex(row=>row.date===selectedDetailDate);if(selectedIndex<0)selectedIndex=0;
   const selected=town.daily[selectedIndex];selectedDetailDate=selected.date;const source=selected.ensemble?'Médiane de 51 scénarios ECMWF':'Modèle local haute résolution';
-  const sourceUrl=selected.ensemble?'https://open-meteo.com/en/docs/ensemble-api':'https://open-meteo.com/en/docs';document.querySelector('#details-title').textContent=town.name;
+  const sourceUrl=selected.ensemble?'https://open-meteo.com/en/docs/ensemble-api':'https://open-meteo.com/en/docs';document.querySelector('#details-title').textContent=selectedDetailName||town.name;
   const dailyStrip=document.querySelector('#daily-strip');dailyStrip.innerHTML=town.daily.map((row,index)=>`<button class="daily-choice ${{index===selectedIndex?'active':''}}" data-date="${{row.date}}">
   <span class="daily-icon">${{icons[row.weather]}}</span><span class="daily-weekday">${{row.weekday}}</span><span class="daily-number">${{String(row.day).padStart(2,'0')}}</span></button>`).join('');
   dailyStrip.querySelectorAll('button').forEach(button=>button.onclick=()=>showDetails(id,button.dataset.date));
@@ -482,7 +531,7 @@ function show(i,draggedStrip=null){{if(!data.frames.length)return;currentIndex=M
   days.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeDay));
   hours.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button===activeHour));
   if(draggedStrip!==days)centerChoice(days,activeDay);if(draggedStrip!==hours)centerChoice(hours,activeHour);
-  if(selectedTownId)showDetails(selectedTownId);requestAnimationFrame(layoutLabels);
+  updatePlannerFocus();if(selectedTownId)showDetails(selectedTownId);requestAnimationFrame(layoutLabels);
 }}
 function centerChoice(strip,button){{if(button)strip.scrollTo({{left:button.offsetLeft-(strip.clientWidth-button.offsetWidth)/2,behavior:'smooth'}})}}
 function indexFor(day,hour){{const candidates=data.frames.map((frame,index)=>({{frame,index}})).filter(item=>item.frame.day===day);
@@ -491,18 +540,21 @@ function indexFor(day,hour){{const candidates=data.frames.map((frame,index)=>({{
   const before=candidates.filter(item=>item.frame.hour<=hour).at(-1);
   return (before??candidates.at(-1)).index;
 }}
+function updatePlannerFocus(){{if(!plannerFocusMarker||!plannerFocusTown)return;const value=data.frames[currentIndex]?.values[plannerFocusTown.weather_town_id],root=plannerFocusMarker.getElement();if(!value||!root)return;root.querySelector('.temperature').textContent=value.temperature+'°';root.querySelector('.weather').textContent=icons[value.weather]}}
 function focusPlannerTown(town,date,hour){{
-  closePlanner();show(indexFor(date,hour));
+  closePlanner();show(indexFor(date,hour));plannerFocusTown=town;
   if(plannerFocusMarker)map.removeLayer(plannerFocusMarker);
   plannerFocusMarker=L.marker([town.lat,town.lon],{{zIndexOffset:2000,icon:L.divIcon({{
-    className:'planner-focus',iconSize:[24,24],iconAnchor:[12,12]
-  }})}}).addTo(map).bindTooltip(town.name,{{permanent:true,direction:'top',offset:[0,-15],className:'planner-focus-label'}});
+    className:'meteo-marker',iconSize:[1,1],iconAnchor:[0,0],html:'<span class="temperature" style="transform:translate(0,-36px) translate(-50%,-50%)">–</span><span class="weather"></span>'
+  }})}}).addTo(map).bindTooltip(town.name,{{permanent:true,direction:'top',offset:[0,-25],className:'planner-focus-label'}});
+  plannerFocusMarker.on('click',()=>showDetails(town.weather_town_id,date,town.name));updatePlannerFocus();
   map.setView([town.lat,town.lon],Math.max(map.getZoom(),10),{{animate:true}});
 }}
-tripDays.addEventListener('click',event=>{{const card=event.target.closest('button.trip-stop');if(!card)return;
+tripDays.addEventListener('click',event=>{{if(event.target.closest('.meteofrance-link'))return;const card=event.target.closest('.trip-stop[data-town]');if(!card)return;
   const name=decodeURIComponent(card.dataset.town),town=data.planner_towns.find(candidate=>candidate.name===name);
   if(town)focusPlannerTown(town,card.dataset.date,Number(card.dataset.hour));
 }});
+tripDays.addEventListener('keydown',event=>{{if(!['Enter',' '].includes(event.key)||event.target.closest('.meteofrance-link'))return;const card=event.target.closest('.trip-stop[data-town]');if(card){{event.preventDefault();card.click()}}}});
 const seenDays=new Set();data.frames.forEach(frame=>{{if(seenDays.has(frame.day))return;seenDays.add(frame.day);const button=document.createElement('button');
   button.dataset.day=frame.day;button.textContent=frame.day_label;button.onclick=()=>{{stop();show(indexFor(frame.day,data.frames[currentIndex].hour))}};days.append(button);
 }});
@@ -527,9 +579,10 @@ enableSlideSelection(days);enableSlideSelection(hours);
 let timer=null;function stop(){{clearInterval(timer);timer=null;if(mapPlay)mapPlay.textContent='▶'}}function toggle(){{if(timer)return stop();if(currentIndex===data.frames.length-1)show(0);mapPlay.textContent='⏸';
   timer=setInterval(()=>{{if(currentIndex>=data.frames.length-1)return stop();show(currentIndex+1)}},{speed});
 }}
-document.querySelector('#close-details').onclick=()=>{{details.hidden=true;selectedTownId=null;selectedDetailDate=null;document.querySelector('main').classList.remove('details-open');setTimeout(()=>map.invalidateSize(),0)}};
+document.querySelector('#close-details').onclick=()=>{{details.hidden=true;selectedTownId=null;selectedDetailDate=null;selectedDetailName=null;document.querySelector('main').classList.remove('details-open');setTimeout(()=>map.invalidateSize(),0)}};
 document.addEventListener('keydown',event=>{{if(event.key==='ArrowLeft'){{stop();show(currentIndex-1)}}if(event.key==='ArrowRight'){{stop();show(currentIndex+1)}}if(event.key===' '){{event.preventDefault();toggle()}}}});
-map.on('zoomend resize',drawRouteArrows);map.on('zoomend moveend resize',layoutLabels);map.whenReady(()=>show(0));
+window.addEventListener('popstate',()=>{{if(forecastRoute().active)openPlanner(false);else closePlanner(false)}});
+map.on('zoomend resize',drawRouteArrows);map.on('zoomend moveend resize',layoutLabels);map.whenReady(()=>{{show(0);if(initialForecast.active){{openPlanner(false);const path=initialForecast.date?forecastPath(true):forecastPath(false);history.replaceState({{forecast:true}},'',path);rememberView(path)}}else rememberView(routeBasePath)}});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('{escape(config.github_pages_base_url)}/sw.js');
 </script></body></html>"""
 

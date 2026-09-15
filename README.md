@@ -1,11 +1,12 @@
 # GPX Weather
 
 GPX Weather génère des cartes météo interactives pour tous les parcours GPX
-placés localement dans `_gpx/`. Les pages utilisent Open-Meteo, les ensembles ECMWF,
-Leaflet et OpenStreetMap. Elles peuvent être installées comme webapp mobile.
+placés localement dans `_gpx/`. Les pages utilisent Open-Meteo, les ensembles
+ECMWF, Leaflet, OpenStreetMap, la Base Adresse Nationale et GeoNames. Elles
+peuvent être installées comme webapp mobile.
 
 Le workflow `.github/workflows/pages.yml` reconstruit et republie le site sur
-GitHub Pages à chaque push sur `main` et toutes les trois heures.
+GitHub Pages à chaque push sur `main` et cinq fois par jour.
 
 ## Prérequis
 
@@ -42,11 +43,115 @@ GITHUB_ACTIONS=true python app.py
 Les fichiers sont créés dans `_output/`. Pour les consulter :
 
 ```bash
-python -m http.server 8000 --directory _output
+python serve.py 8000
 ```
 
 Ouvrir ensuite <http://localhost:8000/>. Le dossier `_output/` contient les
 caches météo et les pages produites ; il est ignoré par Git.
+
+Ce serveur local gère également les URL de planning comme
+`/g727-2026/forecast/20260926-8-5`. Les trois valeurs représentent la date de
+départ, l'heure de départ et le nombre de jours. Le serveur HTTP standard de
+Python ne sait pas résoudre ces routes dynamiques : il faut utiliser
+`serve.py`.
+
+## Utiliser la carte et les prévisions du voyage
+
+- `/g727-2026/` ouvre la carte météo du parcours ;
+- `/g727-2026/forecast/` ouvre le dernier planning enregistré localement ;
+- `/g727-2026/forecast/20260926-8-5` impose un départ le 26 septembre 2026 à
+  8 h pour une durée de 5 jours.
+
+La roue crantée ouvre les prévisions du voyage. Les changements de date,
+d'heure et de durée sont enregistrés dans le stockage local du navigateur.
+Le bouton de partage produit toujours l'URL détaillée contenant ces trois
+paramètres.
+
+Un clic sur une prévision Matin, Midi ou Soir revient à la carte et affiche la
+ville concernée comme un point météo normal. Un second clic sur son pictogramme
+ouvre la fiche détaillée ; les données proviennent du point météo disponible le
+plus proche de cette ville.
+
+La page d'accueil redirige automatiquement vers la dernière carte ou le dernier
+planning consulté. Le lien **Accueil et aide** du menu permet toujours de
+revenir explicitement au sélecteur de parcours.
+
+## Calcul des étapes
+
+Le projet construit deux découpages complémentaires : les villes principales
+affichées sur la carte sont déterminées pendant la génération, tandis que les
+étapes quotidiennes du voyage sont recalculées dans le navigateur selon la date,
+l'heure de départ et la durée choisies.
+
+### Sélection des villes principales
+
+1. La longueur du parcours et la position kilométrique de chaque point sont
+   calculées sur le GPX avec la formule de haversine. Web Mercator n'est utilisé
+   que pour dessiner la carte et jamais pour mesurer les distances.
+2. Overpass fournit toutes les communes situées dans un corridor de 5 km autour
+   de la trace. Les communes appartenant à une même agglomération sont
+   regroupées dans un rayon de 8 km ; la plus peuplée est conservée.
+3. Le départ et l'arrivée sont les communes administratives contenant les deux
+   extrémités exactes du GPX, trouvées par géocodage inverse. Elles ne sont pas
+   remplacées par une ville plus importante située quelques kilomètres plus
+   loin.
+4. Le nombre théorique de tronçons vaut `trip_days - 1`. Les positions idéales
+   sont donc réparties régulièrement sur la distance totale.
+5. Parmi les villes situées dans la moitié centrale du parcours, la ville la
+   plus peuplée devient une ville-ancre. Cela empêche notamment une grande ville
+   structurante d'être éliminée au profit d'un village placé plus exactement sur
+   une position théorique. Les autres cibles sont réparties de chaque côté de
+   cette ancre, avec une cible supplémentaire avant l'optimisation pour éviter
+   de créer un grand vide.
+6. L'optimiseur privilégie successivement le nombre d'étapes valides, leur
+   équilibre entre les deux parties du parcours, la population, la proximité de
+   la trace puis la proximité de la position idéale.
+
+Deux villes retenues doivent être séparées d'au moins
+`distance_totale / city_spacing_divisor` **à vol d'oiseau**. Avec la valeur par
+défaut `city_spacing_divisor = 18`, une boucle de 720 km impose donc environ
+40 km entre deux villes, même si elles se trouvent très loin l'une de l'autre en
+suivant la trace. Cette règle évite les superpositions lorsque le parcours se
+replie sur lui-même.
+
+### Découpage quotidien du voyage
+
+Le découpage ne partage pas simplement les kilomètres. Un profil d'effort est
+calculé à partir du GPX après lissage médian des altitudes :
+
+```text
+effort équivalent (km) = distance (km) + D+ / 100 × 6,6667
+```
+
+Ainsi, une portion de 10 km comportant 100 m de D+ compte comme environ
+16,67 km plats. Cela correspond au réglage demandé : sur cette portion, la
+vitesse effective est réduite d'environ 40 %. L'effort total est partagé à parts
+égales entre les jours, puis chaque limite d'effort est reconvertie en position
+kilométrique sur la trace. Une journée montagneuse est donc plus courte qu'une
+journée plate.
+
+Les cyclistes disposent d'une plage quotidienne de 12 heures, mais le calcul de
+la vitesse affichée utilise 9 heures de roulage effectif afin de réserver un
+tiers du temps aux arrêts. Cette valeur ne modifie pas la position des étapes.
+
+Pour chaque journée :
+
+- **Matin** correspond à la ville où la nuit précédente a été passée ;
+- **Soir** correspond à la ville la plus proche de la limite d'effort du jour et
+  devient obligatoirement le **Matin** du lendemain ;
+- **Midi** utilise une ville intermédiaire proche de la position atteinte à
+  midi, différente des villes du matin et du soir lorsque cela est possible.
+
+Un maillage secondaire de communes, espacé par défaut d'environ 25 km le long
+de la trace, fournit ces noms sans afficher toutes les communes sur la carte.
+Les mesures météo sont moins nombreuses : des points sont sélectionnés environ
+tous les 100 km et chaque étape utilise les prévisions du point disponible le
+plus proche à vol d'oiseau.
+
+Les principaux réglages se trouvent dans `config.py` : `trip_days`,
+`city_spacing_divisor`, `planning_climb_km_per_100m`,
+`planning_daily_riding_hours`, `planning_daily_moving_hours`,
+`planning_city_interval_km` et `planning_weather_interval_km`.
 
 ## Ajouter un parcours
 
@@ -175,11 +280,13 @@ https://MON_COMPTE.github.io/MON_DEPOT/mon-parcours/
 Le cron défini dans `.github/workflows/pages.yml` utilise l'heure UTC :
 
 ```yaml
-- cron: "17 */3 * * *"
+- cron: "0 4,7,10,14,20 * * *"
 ```
 
-Il actualise les prévisions toutes les trois heures. GitHub peut décaler de
-quelques minutes le démarrage d'un cron.
+Il actualise les prévisions cinq fois par jour. Ces horaires correspondent à
+6 h, 9 h, 12 h, 16 h et 22 h à Paris pendant l'heure d'été, et une heure plus
+tôt pendant l'heure d'hiver. GitHub peut décaler de quelques minutes le
+démarrage effectif d'un cron.
 
 ## Générer et publier depuis son poste
 
@@ -190,8 +297,8 @@ python app.py
 ```
 
 génère les cartes localement, puis lance le workflow GitHub avec `gh`. Cela ne
-fait pas de commit et n'envoie pas les caches de `_output/`. Le code et les GPX publics
-doivent déjà avoir été poussés sur GitHub.
+fait pas de commit et n'envoie pas les caches de `_output/`. Le code et les GPX
+publics doivent déjà avoir été poussés sur GitHub.
 
 Pour lancer uniquement la publication distante :
 
@@ -213,7 +320,9 @@ prévisions nécessitent une connexion réseau.
 ## Dépannage
 
 - **Aucun GPX trouvé** : vérifier qu'au moins un fichier `.gpx` est présent
-  dans `_gpx/` pour une génération locale, ou dans `webapp/gpx/` sur GitHub
+  dans `_gpx/` pour une génération locale, ou dans `webapp/gpx/` sur GitHub ;
+- **Une URL `/forecast/...` renvoie une erreur en local** : arrêter
+  `python -m http.server` et lancer `python serve.py PORT` ;
 - **Le workflow recalcule les villes** : générer puis versionner le fichier
   `webapp/gpx/<slug>.villes.csv`.
 - **Erreur de publication locale** : vérifier `gh auth status` et la valeur de

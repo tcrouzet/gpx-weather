@@ -44,8 +44,13 @@ Usage :
 """
 
 import os
+import csv
+import re
+import ssl
 import sys
 import time
+import unicodedata
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -65,6 +70,11 @@ try:
     import requests
 except ImportError:
     sys.exit("Le module 'requests' est requis : pip install requests")
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
 
 import config
 
@@ -128,6 +138,9 @@ def parse_towns_from_elements(elements):
             "lat": el["lat"],
             "lon": el["lon"],
             "population": population,
+            "postcode": tags.get("addr:postcode") or tags.get("postal_code"),
+            "wikidata": tags.get("wikidata"),
+            "geoname_id": tags.get("geonames:id") or tags.get("geonames"),
         })
     return towns
 
@@ -271,6 +284,96 @@ def get_nearest_endpoint_place(lat, lon, towns, radius_km):
         return None
     distance, town = min(candidates, key=lambda item: item[0])
     return town["name"] if distance <= radius_km else None
+
+
+def get_french_postcode(lat, lon):
+    """Récupère le code postal via la Base Adresse Nationale française."""
+    try:
+        response = requests.get(
+            "https://api-adresse.data.gouv.fr/reverse/",
+            params={"lat": lat, "lon": lon}, timeout=15,
+        )
+        response.raise_for_status()
+        features = response.json().get("features", [])
+        return features[0].get("properties", {}).get("postcode") if features else None
+    except Exception as error:
+        print(f"  (code postal indisponible pour {lat:.4f},{lon:.4f} : {error})")
+        return None
+
+
+def load_geonames_places():
+    """Charge le catalogue mondial GeoNames des lieux habités (>500 hab.)."""
+    archive = os.path.join(config.output_root, "geonames-cities500.zip")
+    if not os.path.exists(archive):
+        response = requests.get(
+            "https://download.geonames.org/export/dump/cities500.zip",
+            headers={"User-Agent": "GPXWeather/1.0"}, timeout=60,
+        )
+        response.raise_for_status()
+        os.makedirs(config.output_root, exist_ok=True)
+        with open(archive, "wb") as handle:
+            handle.write(response.content)
+    places = []
+    with zipfile.ZipFile(archive) as bundle:
+        filename = next(name for name in bundle.namelist() if name.endswith(".txt"))
+        with bundle.open(filename) as handle:
+            for raw_line in handle:
+                fields = raw_line.decode("utf-8").rstrip("\n").split("\t")
+                places.append((fields[0], float(fields[4]), float(fields[5])))
+    return places
+
+
+def nearest_geoname_id(lat, lon, places, maximum_km=10):
+    """Identifiant du lieu habité GeoNames le plus proche, jamais une zone administrative."""
+    best = min(
+        places,
+        key=lambda place: float(haversine_km(lat, lon, place[1], place[2])),
+    )
+    distance = float(haversine_km(lat, lon, best[1], best[2]))
+    return best[0] if distance <= maximum_km else None
+
+
+def load_wunderground_stations():
+    """Charge les aéroports disposant d'un code ICAO utilisable par WU."""
+    path = os.path.join(config.output_root, "ourairports.csv")
+    if not os.path.exists(path):
+        response = requests.get(
+            "https://ourairports.com/data/airports.csv",
+            headers={"User-Agent": "GPXWeather/1.0"}, timeout=60,
+        )
+        response.raise_for_status()
+        os.makedirs(config.output_root, exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(response.content)
+    with open(path, encoding="utf-8-sig", newline="") as handle:
+        return [
+            (row["gps_code"], row["iso_country"].lower(),
+             float(row["latitude_deg"]), float(row["longitude_deg"]))
+            for row in csv.DictReader(handle)
+            if row.get("gps_code") and row.get("type") in {"large_airport", "medium_airport"}
+        ]
+
+
+def wunderground_url(name, lat, lon, stations):
+    """Retourne uniquement une page WU réellement accessible."""
+    slug = "".join(
+        character for character in unicodedata.normalize("NFKD", str(name))
+        if not unicodedata.combining(character)
+    ).lower()
+    slug = "-".join(part for part in re.split(r"[^a-z0-9]+", slug) if part)
+    candidates = sorted(
+        stations,
+        key=lambda station: float(haversine_km(lat, lon, station[2], station[3])),
+    )[:4]
+    for station, country, _, _ in candidates:
+        url = f"https://www.wunderground.com/calendar/{country}/{slug}/{station}"
+        try:
+            response = requests.get(url, headers={"User-Agent": "GPXWeather/1.0"}, timeout=12)
+            if response.status_code == 200:
+                return url
+        except requests.RequestException:
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +717,18 @@ def main():
             fixed_points=endpoint_points,
         )
 
-    geolocator = Nominatim(user_agent="town_tcrouzet")
+    # Les Python installés hors du système (notamment python.org/Homebrew sur
+    # macOS) ne trouvent pas toujours le trousseau CA de macOS. Geopy accepte
+    # un contexte SSL explicite : on s'appuie sur le bundle maintenu par
+    # certifi au lieu de désactiver dangereusement la vérification TLS.
+    ssl_context = (
+        ssl.create_default_context(cafile=certifi.where())
+        if certifi is not None else ssl.create_default_context()
+    )
+    geolocator = Nominatim(
+        user_agent="GPXWeather/1.0",
+        ssl_context=ssl_context,
+    )
     endpoint_cache = {}
     rows = []
     used_names = set()
@@ -682,6 +796,9 @@ def main():
             "lat": town["lat"],
             "lon": town["lon"],
             "population": town.get("population"),
+            "postcode": town.get("postcode"),
+            "wikidata": town.get("wikidata"),
+            "geoname_id": town.get("geoname_id"),
             "distance_km": round(actual_km, 1),
             "role": role,
         })
@@ -703,17 +820,24 @@ def main():
     # Les communes secondaires alimentent le calcul du planning mais ne sont
     # pas affichées comme marqueurs sur la carte principale.
     selected_names = {row["name"] for row in rows}
+    # Les communes secondaires susceptibles d'être proposées par le planning
+    # respectent elles aussi la distance minimale aux deux extrémités.
+    eligible_planning_towns = [
+        town for town in planner_towns_on_track
+        if all(haversine_km(town["lat"], town["lon"], lat, lon)
+               >= minimum_city_distance_km for lat, lon in endpoint_points)
+    ]
     planning_towns = select_planning_towns(
-        planner_towns_on_track, total_distance_km,
+        eligible_planning_towns, total_distance_km,
         getattr(config, "planning_city_interval_km", 25),
     )
     weather_interval = getattr(config, "planning_weather_interval_km", 100)
     weather_checkpoint_names = {
-        min(planner_towns_on_track, key=lambda town: abs(town["track_km"] - target))["name"]
+        min(eligible_planning_towns, key=lambda town: abs(town["track_km"] - target))["name"]
         for target in np.arange(weather_interval, total_distance_km, weather_interval)
     }
     planning_by_name = {town["name"]: town for town in planning_towns}
-    for town in planner_towns_on_track:
+    for town in eligible_planning_towns:
         if town["name"] in weather_checkpoint_names:
             planning_by_name[town["name"]] = town
     planning_towns = sorted(planning_by_name.values(), key=lambda town: town["track_km"])
@@ -723,10 +847,38 @@ def main():
         rows.append({
             "name": town["name"], "lat": town["lat"], "lon": town["lon"],
             "population": town.get("population"),
+            "postcode": town.get("postcode"),
+            "wikidata": town.get("wikidata"),
+            "geoname_id": town.get("geoname_id"),
             "distance_km": round(float(town["track_km"]), 1),
             "role": ("meteo" if town["name"] in weather_checkpoint_names
                      else "planning"),
         })
+
+    postcode_cache = {}
+    geonames_places = None
+    wunderground_stations = None
+    for row in rows:
+        # Seule la BAN détermine qu'une commune est française. Un code postal
+        # OSM étranger ne doit jamais produire une URL /previsions-meteo-france/.
+        key = (round(float(row["lat"]), 4), round(float(row["lon"]), 4))
+        if key not in postcode_cache:
+            postcode_cache[key] = get_french_postcode(row["lat"], row["lon"])
+        postcode = postcode_cache[key]
+        row["postcode"] = postcode
+        geoname_id = None
+        if not postcode:
+            if geonames_places is None:
+                geonames_places = load_geonames_places()
+            geoname_id = nearest_geoname_id(
+                row["lat"], row["lon"], geonames_places
+            )
+        row["geoname_id"] = geoname_id
+        if wunderground_stations is None:
+            wunderground_stations = load_wunderground_stations()
+        row["wunderground_url"] = wunderground_url(
+            row["name"], row["lat"], row["lon"], wunderground_stations
+        )
 
     df = pd.DataFrame(rows).sort_values("distance_km").reset_index(drop=True)
 

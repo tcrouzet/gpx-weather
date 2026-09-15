@@ -20,7 +20,7 @@ menuButton.onclick=event=>{event.stopPropagation();routeMenu.hidden=!routeMenu.h
 document.addEventListener('click',event=>{if(!routeMenu.contains(event.target)&&event.target!==menuButton)routeMenu.hidden=true});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')routeMenu.hidden=true});
 const shareButton=document.querySelector('#share-button');
-shareButton.onclick=async()=>{const shareData={title:document.title,url:location.href};try{if(navigator.share)await navigator.share(shareData);else{await navigator.clipboard.writeText(location.href);shareButton.title='Lien copié';setTimeout(()=>shareButton.title='Partager',1600)}}catch(error){if(error.name!=='AbortError')console.warn('Partage impossible',error)}};
+shareButton.onclick=async()=>{if(window.prepareShareUrl)window.prepareShareUrl();const shareData={title:document.title,url:location.href};try{if(navigator.share)await navigator.share(shareData);else{await navigator.clipboard.writeText(location.href);shareButton.title='Lien copié';setTimeout(()=>shareButton.title='Partager',1600)}}catch(error){if(error.name!=='AbortError')console.warn('Partage impossible',error)}};
 """
 
 
