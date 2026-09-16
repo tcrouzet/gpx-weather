@@ -173,13 +173,26 @@ def process_route(gpx_path):
             source_columns = {
                 "wunderground_url", "meteociel_url", "lachainemeteo_url",
             }
+            country_paths = {
+                "FR": "/meteo-france/", "ES": "/meteo-espagne/",
+                "IT": "/meteo-italie/", "CH": "/meteo-suisse/",
+                "DE": "/meteo-allemagne/", "BE": "/meteo-belgique/",
+                "PT": "/meteo-portugal/", "AD": "/meteo-andorre/",
+                "GB": "/meteo-royaume-uni/", "SE": "/meteo-suede/",
+            }
+            def lachainemeteo_cache_valid(row):
+                value = (row.get("lachainemeteo_url") or "").strip()
+                if value == "-":
+                    return True
+                expected = country_paths.get((row.get("country_code") or "").upper())
+                return bool(expected and expected in urlparse(value).path.casefold())
             towns_schema_current = {
                 "elevation", "wunderground_url", "meteociel_url",
                 "lachainemeteo_url", "country_code",
             } <= columns and all(
                 (row.get(column) or "").strip()
                 for row in rows for column in source_columns
-            )
+            ) and all(lachainemeteo_cache_valid(row) for row in rows)
     if not towns_schema_current:
         run_step("town", "Étape 1 : town")
     else:

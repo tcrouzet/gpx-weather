@@ -447,19 +447,38 @@ class LinkParser(HTMLParser):
             self._text = []
 
 
+LACHAINEMETEO_COUNTRIES = {
+    "FR": "France", "ES": "Espagne", "IT": "Italie",
+    "CH": "Suisse", "DE": "Allemagne", "BE": "Belgique",
+    "PT": "Portugal", "AD": "Andorre", "GB": "Royaume-Uni",
+    "SE": "Suède",
+}
+
+
+def normalized_slug(value):
+    text = "".join(
+        character for character in unicodedata.normalize("NFKD", str(value))
+        if not unicodedata.combining(character)
+    ).casefold()
+    return "-".join(part for part in re.split(r"[^a-z0-9]+", text) if part)
+
+
+def lachainemeteo_country_matches(url, country_code):
+    country = LACHAINEMETEO_COUNTRIES.get(str(country_code or "").upper())
+    if not country:
+        return False
+    return f"/meteo-{normalized_slug(country)}/" in urlparse(str(url)).path.casefold()
+
+
 def lachainemeteo_url(name, lat, lon, postcode=None, country_code=None):
     """Résout et mémorise la fiche ville depuis la recherche officielle."""
     def resolve():
         postal = ""
         if postcode is not None and not pd.isna(postcode):
             postal = str(postcode).split(".")[0].strip()
-        country_names = {
-            "FR": "France", "ES": "Espagne", "IT": "Italie",
-            "CH": "Suisse", "DE": "Allemagne", "BE": "Belgique",
-            "PT": "Portugal", "AD": "Andorre", "GB": "Royaume-Uni",
-            "SE": "Suède",
-        }
-        country = country_names.get(str(country_code or "").upper(), country_code or "")
+        country = LACHAINEMETEO_COUNTRIES.get(
+            str(country_code or "").upper(), country_code or ""
+        )
         terms = " ".join(
             part for part in (str(name).strip(), str(country).strip(), postal) if part
         )
@@ -480,7 +499,9 @@ def lachainemeteo_url(name, lat, lon, postcode=None, country_code=None):
 
         # Certaines recherches peuvent rediriger directement vers la fiche.
         if "recherche-previsions-meteo" not in response.url:
-            return response.url
+            return response.url if lachainemeteo_country_matches(
+                response.url, country_code
+            ) else None
 
         parser = LinkParser()
         try:
@@ -500,18 +521,14 @@ def lachainemeteo_url(name, lat, lon, postcode=None, country_code=None):
                 continue
             if "recherche-previsions-meteo" in parsed.path:
                 continue
+            if not lachainemeteo_country_matches(url, country_code):
+                continue
             if not any(marker in parsed.path for marker in (
                 "/meteo-", "/previsions-meteo", "/ville-"
             )):
                 continue
             haystack = html_module.unescape(f"{parsed.path} {label}").casefold()
             score = sum(word in haystack for word in name_words) * 10
-            normalized_country = "".join(
-                character for character in unicodedata.normalize("NFKD", str(country))
-                if not unicodedata.combining(character)
-            ).casefold()
-            if normalized_country and normalized_country in haystack:
-                score += 100
             if postal and postal in haystack:
                 score += 100
             if score:
@@ -1052,9 +1069,13 @@ def main():
             or meteociel_url(row["name"], row["lat"], row["lon"])
             or "-"
         )
+        previous_lachainemeteo = previous_url(row, "lachainemeteo_url")
+        if not lachainemeteo_country_matches(
+            previous_lachainemeteo, row.get("country_code")
+        ):
+            previous_lachainemeteo = None
         row["lachainemeteo_url"] = (
-            previous_url(row, "lachainemeteo_url")
-            or lachainemeteo_url(
+            previous_lachainemeteo or lachainemeteo_url(
                 row["name"], row["lat"], row["lon"], row.get("postcode"),
                 row.get("country_code"),
             )
