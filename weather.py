@@ -48,6 +48,12 @@ except ImportError:
 import config
 
 
+def report_progress(fraction, label):
+    callback = getattr(config, "progress_callback", None)
+    if callback:
+        callback(fraction, f"{config.project} · {label}")
+
+
 # ---------------------------------------------------------------------------
 # 1. Lecture des villes selectionnees (sortie de town.py)
 # ---------------------------------------------------------------------------
@@ -326,6 +332,10 @@ def fetch_all_forecasts(client, ensemble_session, towns, forecast_days=16, ensem
     dans l'ordre de la distance parcourue."""
     frames = []
     for i, town in enumerate(towns):
+        report_progress(
+            i / max(1, len(towns)),
+            f"météo {i + 1}/{len(towns)} · {town['name']}",
+        )
         print(
             f"  -> Ville {i + 1}/{len(towns)} : {town['name']} "
             f"({town['role']}, km {town['distance_km']}) "
@@ -353,6 +363,7 @@ def fetch_all_forecasts(client, ensemble_session, towns, forecast_days=16, ensem
         df["role"] = town["role"]
         df["distance_km"] = town["distance_km"]
         frames.append(df)
+    report_progress(.99, "assemblage des prévisions")
     return pd.concat(frames, ignore_index=True)
 
 

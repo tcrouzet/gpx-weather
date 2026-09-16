@@ -82,6 +82,12 @@ except ImportError:
 import config
 
 
+def report_progress(fraction, label):
+    callback = getattr(config, "progress_callback", None)
+    if callback:
+        callback(fraction, f"{config.project} · {label}")
+
+
 # Overpass exige un User-Agent explicite depuis 2024, sinon il renvoie une
 # erreur 406. On fournit aussi un miroir de secours si le serveur principal
 # est temporairement indisponible ou surcharge.
@@ -633,8 +639,8 @@ def project_towns_on_track(towns, track_lats, track_lons, track_cum_km, radius_k
     ou qu'elles se trouvent (pile a un intervalle ideal ou entre deux).
 
     C'est cette liste, triee par position en km, qui sert ensuite a
-    choisir la ville la plus proche de chaque intervalle ideal (voir
-    assign_stage_towns), au lieu de chercher seulement au point exact de
+    choisir la ville la plus adaptée à chaque intervalle idéal (voir
+    select_towns_for_targets), au lieu de chercher seulement au point exact de
     l'intervalle."""
     on_track = []
     for t in towns:
@@ -675,88 +681,61 @@ def dedupe_urban_clusters(towns_on_track, cluster_radius_km):
     return kept
 
 
-def select_planning_towns(towns_on_track, total_distance_km, interval_km):
-    """Construit un maillage régulier de communes pour les heures de passage.
-
-    À chaque multiple de ``interval_km``, conserve la commune dont la position
-    le long de la trace est la plus proche. Les villages très voisins ne sont
-    donc pas tous interrogés, mais aucun grand vide artificiel ne subsiste.
-    """
-    selected = []
-    used_names = set()
+def select_regular_towns(towns_on_track, total_distance_km, interval_km,
+                         role="planning", minimum_distance_km=0,
+                         fixed_points=()):
+    """Sélectionne des villes avec l'optimiseur commun sur un pas régulier."""
     targets = np.arange(0, total_distance_km + interval_km, interval_km)
-    for target in targets:
-        candidates = [town for town in towns_on_track if town["name"] not in used_names]
-        if not candidates:
-            break
-        best = min(candidates, key=lambda town: (
-            abs(town["track_km"] - target), town["dist_to_track_km"]
-        ))
-        if abs(best["track_km"] - target) <= interval_km:
-            selected.append(best)
-            used_names.add(best["name"])
-    selected.sort(key=lambda town: town["track_km"])
-    return selected
+    target_pairs = [(float(target), role) for target in targets]
+    assignments = select_towns_for_targets(
+        target_pairs,
+        towns_on_track,
+        max_deviation_km=interval_km,
+        minimum_distance_km=minimum_distance_km,
+        fixed_points=fixed_points,
+    )
+    return sorted(
+        (town for town in assignments.values() if town is not None),
+        key=lambda town: town["track_km"],
+    )
 
 
-def assign_stage_towns(targets, towns_on_track, max_deviation_km,
-                       minimum_distance_km=0, fixed_points=(),
-                       max_assignments=None):
-    """Optimise globalement les villes principales de la trace.
-
-    Le score privilégie successivement le nombre de villes compatibles,
-    l'équilibre entre aller et retour, la population, puis la proximité de
-    la trace et de l'intervalle cible. Une grande ville structurante comme
-    Girona ne peut donc pas être évincée par une petite commune équivalente.
-    """
-    candidate_sets = []
-    for target_km, _ in targets:
-        candidates = []
-        for town in towns_on_track:
-            if abs(town["track_km"] - target_km) > max_deviation_km:
-                continue
-            if any(haversine_km(town["lat"], town["lon"], lat, lon)
-                   < minimum_distance_km for lat, lon in fixed_points):
-                continue
-            candidates.append(town)
-        candidate_sets.append(candidates)
-
-    midpoint = (targets[0][0] + targets[-1][0]) / 2 if targets else 0
-    best_score = None
-    best_assignment = [None] * len(targets)
-
-    def search(index, selected, assignment):
-        nonlocal best_score, best_assignment
-        if index == len(targets):
-            early = sum(town["track_km"] < midpoint for town in selected)
-            late = len(selected) - early
-            quality = sum(
-                town["dist_to_track_km"] * 100
-                + abs(town["track_km"] - targets[position][0])
-                for position, town in enumerate(assignment) if town is not None
+def select_towns_for_targets(targets, towns_on_track, max_deviation_km,
+                             minimum_distance_km=0, fixed_points=(),
+                             max_assignments=None):
+    """Sélection bornée en O(cibles × villes), utilisable à toute fréquence."""
+    all_targets = sorted(targets)
+    targets = all_targets
+    if max_assignments is not None and len(all_targets) > max_assignments:
+        indexes = np.linspace(0, len(all_targets) - 1, max_assignments).round().astype(int)
+        targets = [all_targets[index] for index in sorted(set(indexes))]
+    selected = []
+    assignments = {target: None for target in all_targets}
+    for target_km, role in targets:
+        candidates = [
+            town for town in towns_on_track
+            if abs(town["track_km"] - target_km) <= max_deviation_km
+            and all(haversine_km(town["lat"], town["lon"], lat, lon)
+                    >= minimum_distance_km for lat, lon in fixed_points)
+            and all(
+                town["name"] != other["name"]
+                and haversine_km(town["lat"], town["lon"], other["lat"], other["lon"])
+                >= minimum_distance_km
+                for other in selected
             )
-            population = sum(float(town.get("population") or 0) for town in selected)
-            score = (len(selected), min(early, late), -abs(early - late),
-                     population, -quality)
-            if best_score is None or score > best_score:
-                best_score, best_assignment = score, list(assignment)
-            return
-        if best_score is not None and len(selected) + len(targets) - index < best_score[0]:
-            return
-        if max_assignments is None or len(selected) < max_assignments:
-            for town in candidate_sets[index]:
-                if any(
-                    town["name"] == other["name"]
-                    or haversine_km(town["lat"], town["lon"], other["lat"], other["lon"])
-                    < minimum_distance_km
-                    for other in selected
-                ):
-                    continue
-                search(index + 1, selected + [town], assignment + [town])
-        search(index + 1, selected, assignment + [None])
-
-    search(0, [], [])
-    return {target: town for target, town in zip(targets, best_assignment)}
+        ]
+        if not candidates:
+            assignments[(target_km, role)] = None
+            continue
+        best = min(candidates, key=lambda town: (
+            abs(town["track_km"] - target_km)
+            + 2 * town["dist_to_track_km"]
+            - 1.5 * np.log1p(float(town.get("population") or 0)),
+            town["dist_to_track_km"],
+        ))
+        selected.append(best)
+        assignments[(target_km, role)] = best
+    return assignments
 
 
 # ---------------------------------------------------------------------------
@@ -764,6 +743,7 @@ def assign_stage_towns(targets, towns_on_track, max_deviation_km,
 # ---------------------------------------------------------------------------
 
 def main():
+    report_progress(.02, "lecture du GPX")
     print(f"Lecture du GPX : {config.gpx_file}")
     points = load_gpx_track(config.gpx_file)
     print(f"  -> {len(points)} points dans la trace")
@@ -774,6 +754,7 @@ def main():
 
     print("\nRecherche de toutes les communes le long du trajet "
           "(1 seule requete Overpass, ou lecture du cache)...")
+    report_progress(.08, "chargement des communes")
     raw_towns = load_or_fetch_all_towns(
         track_lats, track_lons, track_cum_km,
         config.town_search_buffer_km, config.all_towns_csv_path,
@@ -807,6 +788,7 @@ def main():
     planner_towns_on_track = project_towns_on_track(
         raw_towns, track_lats, track_lons, track_cum_km, radius_km
     )
+    report_progress(.25, "projection des communes sur la trace")
     print(f"  -> {len(planner_towns_on_track)} communes situees a moins de {radius_km} km "
           "de la trace (corridor des etapes uniquement)")
 
@@ -818,6 +800,7 @@ def main():
     towns_on_track = dedupe_urban_clusters(
         planner_towns_on_track, urban_cluster_radius_km
     )
+    report_progress(.35, "regroupement des zones urbaines")
     print(f"  -> {len(towns_on_track)} communes apres fusion des agglomerations "
           f"(rayon {urban_cluster_radius_km} km, on garde la plus grande de "
           f"chaque groupe)")
@@ -859,7 +842,7 @@ def main():
             for i in range(1, right_candidates + 1)
         ]
         other_targets = left_targets + right_targets
-        stage_assignments = assign_stage_towns(
+        stage_assignments = select_towns_for_targets(
             other_targets, towns_on_track, max_deviation_km,
             minimum_distance_km=minimum_city_distance_km,
             fixed_points=endpoint_points + [(anchor["lat"], anchor["lon"])],
@@ -873,7 +856,7 @@ def main():
               f"avant et {right_candidates} apres, puis {remaining} retenue(s)")
     else:
         stage_targets = [(ideal_stage_km * i, "etape") for i in range(1, n_stages + 1)]
-        stage_assignments = assign_stage_towns(
+        stage_assignments = select_towns_for_targets(
             stage_targets, towns_on_track, max_deviation_km,
             minimum_distance_km=minimum_city_distance_km,
             fixed_points=endpoint_points,
@@ -905,7 +888,12 @@ def main():
 
     targets = [(0.0, "depart")] + stage_targets + [(total_distance_km, "arrivee")]
 
-    for target_km, role in targets:
+    report_progress(.45, "construction des villes principales")
+    for target_index, (target_km, role) in enumerate(targets):
+        report_progress(
+            .45 + .12 * target_index / max(1, len(targets)),
+            f"villes principales {target_index + 1}/{len(targets)}",
+        )
         lat, lon = track_point_at_km(target_km, track_lats, track_lons, track_cum_km)
         elevation = track_elevation_at_km(target_km, track_cum_km, track_elevs)
 
@@ -987,11 +975,12 @@ def main():
     # Les communes secondaires susceptibles d'être proposées par le planning
     # respectent elles aussi la distance minimale aux deux extrémités.
     eligible_planning_towns = [
-        town for town in planner_towns_on_track
+        town for town in towns_on_track
         if all(haversine_km(town["lat"], town["lon"], lat, lon)
                >= minimum_city_distance_km for lat, lon in endpoint_points)
     ]
-    planning_towns = select_planning_towns(
+    report_progress(.60, "sélection des villes intermédiaires")
+    planning_towns = select_regular_towns(
         eligible_planning_towns, total_distance_km,
         getattr(config, "planning_city_interval_km", 25),
     )
@@ -1039,7 +1028,12 @@ def main():
         value = existing_sources.get(str(row["name"]), {}).get(column)
         return str(value).strip() if value is not None and pd.notna(value) and str(value).strip() else None
 
-    for row in rows:
+    report_progress(.70, "résolution des sources météo")
+    for row_index, row in enumerate(rows):
+        report_progress(
+            .70 + .29 * row_index / max(1, len(rows)),
+            f"sources météo {row_index + 1}/{len(rows)} · {row['name']}",
+        )
         # Seule la BAN détermine qu'une commune est française. Un code postal
         # OSM étranger ne doit jamais produire une URL /previsions-meteo-france/.
         key = (round(float(row["lat"]), 4), round(float(row["lon"]), 4))
@@ -1086,6 +1080,7 @@ def main():
 
     os.makedirs(config.outdir, exist_ok=True)
     df.to_csv(config.towns_csv_path, index=False)
+    report_progress(.99, "écriture du fichier des villes")
 
     print(f"\nResultat :\n{df.to_string(index=False)}")
     print(f"\nCSV sauvegarde : {config.towns_csv_path}")

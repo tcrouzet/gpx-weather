@@ -8,9 +8,12 @@ carto.py pour produire la visualisation Leaflet interactive.
 
 import os
 import csv
+import contextlib
 import json
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -20,10 +23,86 @@ from gpx_export import export_simplified_gpx
 from navigation import NAVIGATION_CSS, NAVIGATION_SCRIPT, render_navigation, render_route_links
 
 
+class PipelineProgress:
+    """Une barre unique, animée même pendant une requête réseau bloquante."""
+
+    def __init__(self, total):
+        self.total = max(1, total)
+        self.completed = 0
+        self.fraction = 0.0
+        self.label = "Initialisation"
+        self.started = time.monotonic()
+        self.running = True
+        self.tty = sys.stderr.isatty()
+        self.stream = sys.__stderr__
+        self.thread = None
+        if self.tty:
+            self.thread = threading.Thread(target=self._animate, daemon=True)
+            self.thread.start()
+
+    def _animate(self):
+        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        index = 0
+        while self.running:
+            width = 24
+            current = self.completed + self.fraction
+            filled = round(width * current / self.total)
+            elapsed = int(time.monotonic() - self.started)
+            line = (f"\r{frames[index % len(frames)]} [{'█' * filled}{'·' * (width-filled)}] "
+                    f"{current:.1f}/{self.total} · {self.label} · {elapsed}s")
+            self.stream.write(line[: max(40, shutil.get_terminal_size((100, 20)).columns - 1)])
+            self.stream.write("\033[K")
+            self.stream.flush()
+            index += 1
+            time.sleep(.15)
+
+    def start(self, label):
+        self.label = label
+        self.fraction = 0.0
+        if not self.tty:
+            print(f"[{self.completed}/{self.total}] {label}", flush=True)
+
+    def update(self, fraction, label=None):
+        self.fraction = max(0.0, min(.99, float(fraction)))
+        if label:
+            self.label = label
+
+    def done(self):
+        self.completed = min(self.total, self.completed + 1)
+        self.fraction = 0.0
+
+    def close(self):
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=.3)
+            self.stream.write("\r" + " " * 120 + "\r")
+            self.stream.flush()
+
+
+PIPELINE_PROGRESS = None
+
+
 def run_step(module_name, label):
-    print(f"\n=== {label} ===")
+    PIPELINE_PROGRESS.start(label)
+    config.progress_callback = PIPELINE_PROGRESS.update
     module = __import__(module_name)
-    module.main()
+    os.makedirs(config.output_root, exist_ok=True)
+    log_path = os.path.join(config.output_root, "pipeline.log")
+    try:
+        with open(log_path, "a", encoding="utf-8") as log, \
+             contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+            print(f"\n=== {label} ===", flush=True)
+            module.main()
+    except Exception:
+        PIPELINE_PROGRESS.label = f"Échec : {label}"
+        print(f"\nÉchec pendant : {label}\nDernières lignes de {log_path} :", file=sys.stderr)
+        try:
+            with open(log_path, encoding="utf-8") as log:
+                print("".join(log.readlines()[-25:]), file=sys.stderr)
+        except OSError:
+            pass
+        raise
+    PIPELINE_PROGRESS.done()
 
 
 def cache_is_fresh(path, max_age_hours):
@@ -156,16 +235,24 @@ if(slugs.includes(slug)&&parts[1]==='forecast'){{const token=parts[2]||'1';locat
 
 def process_route(gpx_path):
     config.configure_route(gpx_path)
-    print(f"\n##### Parcours : {config.project} ({config.route_slug}) #####")
-
-    export_simplified_gpx(
-        config.gpx_file, config.production_gpx_path,
-        interval_km=getattr(config, "production_gpx_interval_km", 1),
-        name=config.project,
-    )
+    PIPELINE_PROGRESS.start(f"{config.project} · simplification GPX")
+    with open(os.path.join(config.output_root, "pipeline.log"), "a", encoding="utf-8") as log, \
+         contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+        export_simplified_gpx(
+            config.gpx_file, config.production_gpx_path,
+            interval_km=getattr(config, "production_gpx_interval_km", 1),
+            name=config.project,
+        )
+    PIPELINE_PROGRESS.done()
 
     towns_schema_current = False
+    towns_code_is_newer = False
     if os.path.exists(config.towns_csv_path):
+        towns_mtime = os.path.getmtime(config.towns_csv_path)
+        towns_code_is_newer = any(
+            os.path.getmtime(os.path.join(config.BASE_DIR, filename)) > towns_mtime
+            for filename in ("town.py", "config.py")
+        )
         with open(config.towns_csv_path, encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
             columns = set(reader.fieldnames or [])
@@ -193,27 +280,26 @@ def process_route(gpx_path):
                 (row.get(column) or "").strip()
                 for row in rows for column in source_columns
             ) and all(lachainemeteo_cache_valid(row) for row in rows)
-    if not towns_schema_current:
-        run_step("town", "Étape 1 : town")
+    if not towns_schema_current or towns_code_is_newer:
+        run_step("town", f"{config.project} · sélection des villes")
     else:
-        print(f"Skipping town.py : {config.towns_csv_path} existe déjà")
+        PIPELINE_PROGRESS.start(f"{config.project} · villes déjà à jour")
+        PIPELINE_PROGRESS.done()
 
     cache_hours = getattr(config, "weather_cache_hours", 3)
     if not weather_cache_is_fresh(cache_hours):
         try:
-            run_step("weather", "Étape 2 : weather")
+            run_step("weather", f"{config.project} · prévisions météo")
         except Exception as exc:
             if not os.path.exists(config.csv_path):
                 raise
-            print(f"Échec de l'actualisation météo, ancien cache conservé : {exc}")
+            PIPELINE_PROGRESS.done()
+            PIPELINE_PROGRESS.label = f"{config.project} · ancien cache météo conservé"
     else:
-        modified = datetime.fromtimestamp(os.path.getmtime(config.csv_path), tz=timezone.utc)
-        print(
-            f"Skipping weather.py : cache valide jusqu'a {cache_hours} h "
-            f"({modified.isoformat(timespec='seconds')})"
-        )
+        PIPELINE_PROGRESS.start(f"{config.project} · météo déjà à jour")
+        PIPELINE_PROGRESS.done()
 
-    run_step("carto", "Étape 4 : carto Leaflet")
+    run_step("carto", f"{config.project} · génération de la carte")
     shutil.copy2(
         config.production_gpx_path,
         os.path.join(config.outdir, "trace.gpx"),
@@ -221,19 +307,29 @@ def process_route(gpx_path):
 
 
 def main():
+    global PIPELINE_PROGRESS
     gpx_files = config.list_gpx_files()
     if not gpx_files:
         raise FileNotFoundError(
             f"Aucun fichier .gpx dans {config.source_gpx_dir} "
             f"ni dans {config.public_gpx_dir}"
         )
+    os.makedirs(config.output_root, exist_ok=True)
+    with open(os.path.join(config.output_root, "pipeline.log"), "w", encoding="utf-8"):
+        pass
+    PIPELINE_PROGRESS = PipelineProgress(len(gpx_files) * 4 + 1)
     routes = []
-    for gpx_path in gpx_files:
-        process_route(gpx_path)
-        routes.append((config.route_slug, config.project))
-    write_routes_index(routes)
-    publish_pages()
-    print("\nPipeline terminé.")
+    try:
+        for gpx_path in gpx_files:
+            process_route(gpx_path)
+            routes.append((config.route_slug, config.project))
+        PIPELINE_PROGRESS.start("Finalisation du site")
+        write_routes_index(routes)
+        publish_pages()
+        PIPELINE_PROGRESS.done()
+    finally:
+        PIPELINE_PROGRESS.close()
+    print(f"Pipeline terminé · journal : {os.path.join(config.output_root, 'pipeline.log')}")
 
 
 if __name__ == "__main__":
