@@ -87,6 +87,11 @@ planning_weather_interval_km = 100
 # perpendiculaire de la trace GPX
 town_search_buffer_km = 5
 
+# Une petite commune voisine n'est absorbée que si la ville dominante est au
+# moins vingt fois plus peuplée. La proximité seule ne suffit jamais.
+urban_cluster_radius_km = 10
+urban_cluster_population_ratio = 20
+
 output_root = os.path.join(BASE_DIR, "_output")
 
 

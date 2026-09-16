@@ -657,25 +657,23 @@ def project_towns_on_track(towns, track_lats, track_lons, track_cum_km, radius_k
     return on_track
 
 
-def dedupe_urban_clusters(towns_on_track, cluster_radius_km):
-    """Fusionne les communes qui appartiennent en realite a la MEME
-    agglomeration (ex: Chamalieres est un quartier/une commune limitrophe
-    de Clermont-Ferrand, a quelques km a peine) : on ne garde que la PLUS
-    GRANDE commune de chaque groupe de communes mutuellement proches
-    (<= cluster_radius_km a vol d'oiseau), pour eviter qu'une etape
-    "juste apres" une grande ville ne re-selectionne en realite un
-    quartier/une banlieue de cette meme ville comme si c'etait une
-    etape distincte."""
+def dedupe_urban_clusters(towns_on_track, cluster_radius_km,
+                          population_ratio=20):
+    """Absorbe une commune voisine seulement en cas d'écart démographique massif."""
     by_pop_desc = sorted(
         towns_on_track, key=lambda t: (t["population"] or 0), reverse=True
     )
     kept = []
     for t in by_pop_desc:
-        too_close_to_bigger = any(
-            haversine_km(t["lat"], t["lon"], k["lat"], k["lon"]) <= cluster_radius_km
+        population = float(t.get("population") or 0)
+        dominated_by_bigger = any(
+            population > 0
+            and float(k.get("population") or 0) >= population * population_ratio
+            and haversine_km(t["lat"], t["lon"], k["lat"], k["lon"])
+                <= cluster_radius_km
             for k in kept
         )
-        if not too_close_to_bigger:
+        if not dominated_by_bigger:
             kept.append(t)
     kept.sort(key=lambda t: t["track_km"])
     return kept
@@ -796,13 +794,17 @@ def main():
     # sinon une "etape" peut re-selectionner un quartier/une banlieue de la
     # grande ville juste choisie a l'intervalle precedent.
     urban_cluster_radius_km = getattr(config, "urban_cluster_radius_km", 8)
+    urban_cluster_population_ratio = getattr(
+        config, "urban_cluster_population_ratio", 20
+    )
     towns_on_track = dedupe_urban_clusters(
-        planner_towns_on_track, urban_cluster_radius_km
+        planner_towns_on_track, urban_cluster_radius_km,
+        urban_cluster_population_ratio,
     )
     report_progress(.35, "regroupement des zones urbaines")
     print(f"  -> {len(towns_on_track)} communes apres fusion des agglomerations "
-          f"(rayon {urban_cluster_radius_km} km, on garde la plus grande de "
-          f"chaque groupe)")
+          f"(rayon {urban_cluster_radius_km} km, rapport de population minimal "
+          f"x{urban_cluster_population_ratio})")
 
     # Ecart maximum tolere entre la position reelle d'une ville-etape et son
     # intervalle ideal : une ville plus eloignee de son intervalle que la
