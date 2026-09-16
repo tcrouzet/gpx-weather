@@ -728,10 +728,9 @@ def select_towns_for_targets(targets, towns_on_track, max_deviation_km,
             assignments[(target_km, role)] = None
             continue
         best = min(candidates, key=lambda town: (
-            abs(town["track_km"] - target_km)
-            + 2 * town["dist_to_track_km"]
-            - 1.5 * np.log1p(float(town.get("population") or 0)),
             town["dist_to_track_km"],
+            -float(town.get("population") or 0),
+            abs(town["track_km"] - target_km),
         ))
         selected.append(best)
         assignments[(target_km, role)] = best

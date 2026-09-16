@@ -103,9 +103,11 @@ l'heure de départ et la durée choisies.
    une position théorique. Les autres cibles sont réparties de chaque côté de
    cette ancre, avec une cible supplémentaire avant l'optimisation pour éviter
    de créer un grand vide.
-6. L'optimiseur privilégie successivement le nombre d'étapes valides, leur
-   équilibre entre les deux parties du parcours, la population, la proximité de
-   la trace puis la proximité de la position idéale.
+6. Dans la fenêtre kilométrique de chaque cible, l'optimiseur privilégie
+   d'abord la commune physiquement la plus proche de la trace, puis la
+   population et enfin la proximité de la position idéale. La ville-ancre
+   centrale reste choisie séparément selon la population afin de conserver les
+   grandes villes structurantes du parcours.
 
 Deux villes retenues doivent être séparées d'au moins
 `distance_totale / city_spacing_divisor` **à vol d'oiseau**. Avec la valeur par
