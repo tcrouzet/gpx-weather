@@ -984,14 +984,14 @@ def main():
         getattr(config, "planning_city_interval_km", 25),
     )
     weather_interval = getattr(config, "planning_weather_interval_km", 100)
-    weather_checkpoint_names = {
-        min(eligible_planning_towns, key=lambda town: abs(town["track_km"] - target))["name"]
-        for target in np.arange(weather_interval, total_distance_km, weather_interval)
-    }
+    weather_towns = select_regular_towns(
+        eligible_planning_towns, total_distance_km,
+        weather_interval, role="meteo",
+    )
+    weather_checkpoint_names = {town["name"] for town in weather_towns}
     planning_by_name = {town["name"]: town for town in planning_towns}
-    for town in eligible_planning_towns:
-        if town["name"] in weather_checkpoint_names:
-            planning_by_name[town["name"]] = town
+    for town in weather_towns:
+        planning_by_name[town["name"]] = town
     planning_towns = sorted(planning_by_name.values(), key=lambda town: town["track_km"])
     for town in planning_towns:
         if town["name"] in selected_names:
