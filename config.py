@@ -77,6 +77,8 @@ elevation_smoothing_points = 5
 
 # Espacement cible du maillage de communes utilisé uniquement par le planning.
 planning_city_interval_km = 25
+# Pour les villes intermédiaires, le centre doit être réellement voisin du GPX.
+planning_city_max_distance_to_track_km = 2
 
 # Points météo secondaires le long du parcours. Ils ne sont pas affichés sur
 # la carte ; le planning utilise ensuite le plus proche à vol d'oiseau.

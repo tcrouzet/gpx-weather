@@ -149,6 +149,8 @@ Pour chaque journée :
 
 Un maillage secondaire de communes, espacé par défaut d'environ 25 km le long
 de la trace, fournit ces noms sans afficher toutes les communes sur la carte.
+Le centre de ces communes doit se trouver à moins de 2 km du GPX, valeur réglée
+par `planning_city_max_distance_to_track_km`.
 Les mesures météo sont moins nombreuses : des points sont sélectionnés environ
 tous les 100 km et chaque étape utilise les prévisions du point disponible le
 plus proche à vol d'oiseau.
@@ -158,7 +160,8 @@ Les principaux réglages se trouvent dans `config.py` : `trip_days`,
 `planning_climb_exponent`, `planning_descent_linear_coefficient`,
 `planning_descent_quadratic_coefficient`, `planning_fatigue_speed_loss_kmh`,
 `planning_daily_riding_hours`, `planning_daily_moving_hours`,
-`planning_city_interval_km` et `planning_weather_interval_km`.
+`planning_city_interval_km`, `planning_city_max_distance_to_track_km` et
+`planning_weather_interval_km`.
 
 ## Ajouter un parcours
 

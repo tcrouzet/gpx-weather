@@ -698,6 +698,39 @@ def select_regular_towns(towns_on_track, total_distance_km, interval_km,
     )
 
 
+def select_towns_between_anchors(towns_on_track, anchor_distances,
+                                 interval_km, role="planning"):
+    """Subdivise séparément chaque intervalle entre villes principales.
+
+    Les subdivisions sont régulières et ne dépassent jamais ``interval_km``.
+    Le choix des communes reste délégué à l'unique optimiseur commun.
+    """
+    selected = {}
+    anchors = sorted(set(float(distance) for distance in anchor_distances))
+    for start, end in zip(anchors, anchors[1:]):
+        section_length = end - start
+        subdivisions = max(1, int(np.ceil(section_length / interval_km)))
+        step = section_length / subdivisions
+        for index in range(1, subdivisions):
+            target = start + step * index
+            zone_start = target - step / 2
+            zone_end = target + step / 2
+            zone_towns = [
+                town for town in towns_on_track
+                if zone_start <= town["track_km"] < zone_end
+                and town["name"] not in selected
+            ]
+            if not zone_towns:
+                continue
+            assignments = select_towns_for_targets(
+                [(target, role)], zone_towns, max_deviation_km=section_length
+            )
+            town = assignments.get((target, role))
+            if town is not None:
+                selected[town["name"]] = town
+    return sorted(selected.values(), key=lambda town: town["track_km"])
+
+
 def select_towns_for_targets(targets, towns_on_track, max_deviation_km,
                              minimum_distance_km=0, fixed_points=(),
                              max_assignments=None):
@@ -977,12 +1010,19 @@ def main():
     # respectent elles aussi la distance minimale aux deux extrémités.
     eligible_planning_towns = [
         town for town in towns_on_track
-        if all(haversine_km(town["lat"], town["lon"], lat, lon)
+        if town["dist_to_track_km"] <= getattr(
+            config, "planning_city_max_distance_to_track_km", 2
+        )
+        and all(haversine_km(town["lat"], town["lon"], lat, lon)
                >= minimum_city_distance_km for lat, lon in endpoint_points)
     ]
     report_progress(.60, "sélection des villes intermédiaires")
-    planning_towns = select_regular_towns(
-        eligible_planning_towns, total_distance_km,
+    main_city_distances = [
+        0.0, *[float(row["distance_km"]) for row in rows], total_distance_km,
+    ]
+    planning_towns = select_towns_between_anchors(
+        eligible_planning_towns,
+        main_city_distances,
         getattr(config, "planning_city_interval_km", 25),
     )
     weather_interval = getattr(config, "planning_weather_interval_km", 100)
