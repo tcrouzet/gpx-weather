@@ -1006,15 +1006,18 @@ def main():
     # Les communes secondaires alimentent le calcul du planning mais ne sont
     # pas affichées comme marqueurs sur la carte principale.
     selected_names = {row["name"] for row in rows}
-    # Les communes secondaires susceptibles d'être proposées par le planning
-    # respectent elles aussi la distance minimale aux deux extrémités.
+    # La forte distance d'exclusion autour du départ et de l'arrivée concerne
+    # uniquement les villes principales. L'appliquer au maillage secondaire
+    # créait de grands trous (par exemple Poussan -> Salles-d'Aude) et
+    # supprimait Pézenas/Béziers. Les villes déjà retenues comme ancres sont
+    # exclues par leur nom ; toutes les autres communes réellement sur le GPX
+    # restent candidates dès le début du parcours.
     eligible_planning_towns = [
         town for town in towns_on_track
         if town["dist_to_track_km"] <= getattr(
             config, "planning_city_max_distance_to_track_km", 2
         )
-        and all(haversine_km(town["lat"], town["lon"], lat, lon)
-               >= minimum_city_distance_km for lat, lon in endpoint_points)
+        and town["name"] not in selected_names
     ]
     report_progress(.60, "sélection des villes intermédiaires")
     main_city_distances = [

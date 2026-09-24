@@ -117,6 +117,10 @@ def weather_cache_is_fresh(max_age_hours):
     if not os.path.exists(config.csv_path):
         return False
     try:
+        with open(config.csv_path, "r", encoding="utf-8", newline="") as handle:
+            columns = next(csv.reader(handle), [])
+            if not {"cloud_cover", "apparent_temperature"}.issubset(columns):
+                return False
         with open(config.weather_cache_meta_path, "r", encoding="utf-8") as handle:
             fetched = datetime.fromisoformat(json.load(handle)["fetched_at_utc"])
         # Une modification de la liste des villes change les coordonnées des
@@ -227,7 +231,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</scri
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GPX Weather</title></head>
 <body><p>Chargement…</p><script>
 const base={json.dumps(base_path)},slugs={slugs},relative=location.pathname.startsWith(base)?location.pathname.slice(base.length):'',parts=relative.split('/').filter(Boolean),slug=parts[0];
-if(slugs.includes(slug)&&parts[1]==='forecast'){{const token=parts[2]||'1';location.replace(`${{base}}${{slug}}/?forecast=${{encodeURIComponent(token)}}`)}}else location.replace(base+'?home=1');
+if(slugs.includes(slug)&&['forecast','forecast_details'].includes(parts[1])){{const token=parts[2]||'1',key=parts[1]==='forecast_details'?'forecast_details':'forecast';location.replace(`${{base}}${{slug}}/?${{key}}=${{encodeURIComponent(token)}}`)}}else location.replace(base+'?home=1');
 </script></body></html>'''
     with open(os.path.join(config.output_root, "404.html"), "w", encoding="utf-8") as handle:
         handle.write(fallback)
@@ -332,5 +336,33 @@ def main():
     print(f"Pipeline terminé · journal : {os.path.join(config.output_root, 'pipeline.log')}")
 
 
+def render_web_only():
+    """Reconstruit uniquement le site depuis les GPX et CSV déjà présents."""
+    import carto
+
+    gpx_files = config.list_gpx_files()
+    if not gpx_files:
+        raise FileNotFoundError(
+            f"Aucun fichier .gpx dans {config.source_gpx_dir} "
+            f"ni dans {config.public_gpx_dir}"
+        )
+    routes = []
+    for index, gpx_path in enumerate(gpx_files, 1):
+        config.configure_route(gpx_path)
+        if not os.path.exists(config.csv_path):
+            raise FileNotFoundError(
+                f"Prévisions locales absentes pour {config.project} : "
+                f"lancez ./run.sh une première fois."
+            )
+        print(f"[{index}/{len(gpx_files)}] Rendu web · {config.project}", flush=True)
+        carto.main()
+        routes.append((config.route_slug, config.project))
+    write_routes_index(routes)
+    print(f"Rendu web terminé : {config.output_root}")
+
+
 if __name__ == "__main__":
-    main()
+    if "--web-only" in sys.argv[1:]:
+        render_web_only()
+    else:
+        main()

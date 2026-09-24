@@ -134,7 +134,9 @@ def get_forecast_for_point(client, lat, lon, elevation=None, forecast_days=16,
         "longitude": lon,
         "hourly": [
             "temperature_2m",
+            "apparent_temperature",
             "precipitation",
+            "cloud_cover",
             "wind_speed_10m",
             "wind_gusts_10m",
             "weather_code",
@@ -162,11 +164,13 @@ def get_forecast_for_point(client, lat, lon, elevation=None, forecast_days=16,
         {
             "time": times,
             "temperature": hourly.Variables(0).ValuesAsNumpy(),
-            "precipitation": hourly.Variables(1).ValuesAsNumpy(),
-            "wind_speed": hourly.Variables(2).ValuesAsNumpy(),
-            "wind_gusts": hourly.Variables(3).ValuesAsNumpy(),
-            "weather_code": hourly.Variables(4).ValuesAsNumpy(),
-            "wind_direction": hourly.Variables(5).ValuesAsNumpy(),
+            "apparent_temperature": hourly.Variables(1).ValuesAsNumpy(),
+            "precipitation": hourly.Variables(2).ValuesAsNumpy(),
+            "cloud_cover": hourly.Variables(3).ValuesAsNumpy(),
+            "wind_speed": hourly.Variables(4).ValuesAsNumpy(),
+            "wind_gusts": hourly.Variables(5).ValuesAsNumpy(),
+            "weather_code": hourly.Variables(6).ValuesAsNumpy(),
+            "wind_direction": hourly.Variables(7).ValuesAsNumpy(),
         }
     )
     df["lat"] = lat
@@ -228,7 +232,7 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     """
     url = "https://ensemble-api.open-meteo.com/v1/ensemble"
     variables = [
-        "temperature_2m", "precipitation", "weather_code",
+        "temperature_2m", "precipitation", "cloud_cover", "weather_code",
         "wind_speed_10m", "wind_gusts_10m", "wind_direction_10m",
     ]
     response = session.get(
@@ -255,6 +259,7 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
 
     temperature = member_matrix("temperature_2m")
     precipitation = member_matrix("precipitation")
+    cloud_cover = member_matrix("cloud_cover")
     weather_codes = member_matrix("weather_code")
     wind = member_matrix("wind_speed_10m")
     gusts = member_matrix("wind_gusts_10m")
@@ -273,12 +278,14 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
     result = result.loc[valid].reset_index(drop=True)
     temperature = temperature[valid]
     precipitation = precipitation[valid]
+    cloud_cover = cloud_cover[valid]
     weather_codes = weather_codes[valid]
     wind = wind[valid]
     gusts = gusts[valid]
     wind_direction = wind_direction[valid]
 
     result["temperature"] = np.nanmedian(temperature, axis=1)
+    result["apparent_temperature"] = result["temperature"]
     result["temperature_low"] = np.nanquantile(temperature, .10, axis=1)
     result["temperature_high"] = np.nanquantile(temperature, .90, axis=1)
     # Pour les precipitations, la mediane vaut souvent 0 mm des que moins de
@@ -294,7 +301,6 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
         rainy_count * 100.0, precipitation_count,
         out=np.zeros(len(precipitation)), where=precipitation_count > 0,
     )
-
     def median_or_zero(matrix):
         return np.array([
             np.nanmedian(row) if np.isfinite(row).any() else 0.0 for row in matrix
@@ -302,6 +308,7 @@ def get_ecmwf_ensemble_for_point(session, lat, lon, forecast_days=15):
 
     result["wind_speed"] = median_or_zero(wind)
     result["wind_gusts"] = median_or_zero(gusts)
+    result["cloud_cover"] = median_or_zero(cloud_cover)
 
     def circular_mean_degrees(matrix):
         values = []
