@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Produit un GPX public léger à intervalle kilométrique régulier."""
+"""Produit un GPX public léger sans sacrifier les points hauts et bas."""
 
 import math
 import os
@@ -42,9 +42,38 @@ def clean_point(point):
     )
 
 
-def simplify_points(points, interval_km):
-    """Vise un point par intervalle en préservant en priorité les virages."""
-    total = sum(distance_km(a, b) for a, b in zip(points, points[1:]))
+def cumulative_distances(points):
+    distances = [0.0]
+    for a, b in zip(points, points[1:]):
+        distances.append(distances[-1] + distance_km(a, b))
+    return distances
+
+
+def elevation_extrema_indexes(points, distances, interval_km):
+    """Conserve les altitudes minimale et maximale de chaque tranche.
+
+    La simplification géométrique seule privilégie les virages et peut donc
+    supprimer un sommet situé sur une portion droite. Ce maillage indépendant
+    garantit que les hauts et les creux du profil restent dans le GPX public.
+    """
+    if interval_km <= 0:
+        return set()
+    buckets = {}
+    for index, (point, distance) in enumerate(zip(points, distances)):
+        if point.elevation is None:
+            continue
+        buckets.setdefault(int(distance / interval_km), []).append(index)
+    retained = set()
+    for indexes in buckets.values():
+        retained.add(min(indexes, key=lambda index: points[index].elevation))
+        retained.add(max(indexes, key=lambda index: points[index].elevation))
+    return retained
+
+
+def simplify_points(points, interval_km, elevation_interval_km=.5):
+    """Préserve les virages ainsi que les extrêmes altimétriques réguliers."""
+    distances = cumulative_distances(points)
+    total = distances[-1]
     target_count = max(2, round(total / interval_km) + 1)
     low, high = 0.0, 1000.0
     best = points
@@ -57,14 +86,26 @@ def simplify_points(points, interval_km):
             low = tolerance
         else:
             high = tolerance
-    return [clean_point(point) for point in best], total
+    indexes_by_identity = {id(point): index for index, point in enumerate(points)}
+    retained = {
+        indexes_by_identity[id(point)] for point in best
+        if id(point) in indexes_by_identity
+    }
+    retained.update(elevation_extrema_indexes(
+        points, distances, elevation_interval_km
+    ))
+    retained.update((0, len(points) - 1))
+    return [clean_point(points[index]) for index in sorted(retained)], total
 
 
-def export_simplified_gpx(source_path, destination_path, interval_km=1, name=None):
+def export_simplified_gpx(source_path, destination_path, interval_km=1, name=None,
+                          elevation_interval_km=.5):
     """Écrit le GPX public ; ne réécrit pas un fichier déjà utilisé comme source."""
     if os.path.abspath(source_path) == os.path.abspath(destination_path):
         return destination_path
-    points, total = simplify_points(read_points(source_path), interval_km)
+    points, total = simplify_points(
+        read_points(source_path), interval_km, elevation_interval_km
+    )
     document = gpxpy.gpx.GPX()
     track = gpxpy.gpx.GPXTrack(name=name or "Trace simplifiée")
     track.segments.append(gpxpy.gpx.GPXTrackSegment(points=points))

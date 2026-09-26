@@ -175,9 +175,11 @@ Les principaux réglages se trouvent dans `config.py` : `trip_days`,
    ```
 
 3. Le programme crée dans `webapp/gpx/` un GPX public simplifié à environ un
-   point par kilomètre, son profil d'effort et le CSV des villes. Ces fichiers
-   doivent être versionnés : GitHub Actions les utilise lorsque les originaux
-   privés de `_gpx/` sont absents.
+   point géométrique par kilomètre, complété par les altitudes minimale et
+   maximale de chaque tranche de 500 m afin de préserver sommets et creux ;
+   il crée aussi son profil d'effort et le CSV des villes. Ces fichiers doivent
+   être versionnés : GitHub Actions les utilise lorsque les originaux privés de
+   `_gpx/` sont absents.
 4. Vérifier la carte locale à l'adresse
    `http://localhost:8000/mon-parcours/`.
 

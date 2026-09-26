@@ -246,6 +246,9 @@ def process_route(gpx_path):
             config.gpx_file, config.production_gpx_path,
             interval_km=getattr(config, "production_gpx_interval_km", 1),
             name=config.project,
+            elevation_interval_km=getattr(
+                config, "production_gpx_elevation_interval_km", .5
+            ),
         )
     PIPELINE_PROGRESS.done()
 

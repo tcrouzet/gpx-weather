@@ -42,6 +42,9 @@ gpx_simplify_degrees = 0.0005
 
 # Espacement des points du GPX public téléchargeable.
 production_gpx_interval_km = 1
+# Conserve les points les plus hauts et les plus bas de chaque tranche de 500 m
+# même s'ils se trouvent sur une portion droite supprimée par la simplification.
+production_gpx_elevation_interval_km = 0.5
 
 
 # Heures de prévision (24h correspond à 0h le lendemain).
