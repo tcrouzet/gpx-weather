@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serveur local du site généré, avec routage des URL /forecast/."""
+"""Serveur local du site généré, avec routage des URL de prévision."""
 
 import os
 import re
@@ -11,7 +11,8 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent / "_output"
 FORECAST_PATH = re.compile(
-    r"^/(?P<slug>[^/]+)/forecast(?:/\d{8}-\d{1,2}-\d{1,2})?/?$"
+    r"^/(?P<slug>[^/]+)/(?:forecast|forecast_details)"
+    r"(?:/\d{8}-\d{1,2}-\d{1,2})?/?$"
 )
 
 
